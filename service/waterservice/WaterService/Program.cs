@@ -101,6 +101,14 @@ static void ConfigureSerilog(LoggerConfiguration cfg) => cfg
     .MinimumLevel.Information()
     .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
     .MinimumLevel.Override("Microsoft.Hosting.Lifetime", LogEventLevel.Information)
+    // Silence the per-request / per-attempt framework noise. Without these, each station logs several
+    // lines — the HttpClient request/response logs, and Polly's execution/retry telemetry, which emits a
+    // full stack trace per *handled* retry (a recovered transient timeout). That signal is redundant:
+    // ResiliencePipelines logs one concise line on a breaker state change, and the station processors log
+    // one line per station that ultimately fails. So HttpClient -> Warning, Polly -> Error (off for the
+    // handled-retry noise; genuine unhandled Polly errors still surface).
+    .MinimumLevel.Override("System.Net.Http.HttpClient", LogEventLevel.Warning)
+    .MinimumLevel.Override("Polly", LogEventLevel.Error)
     .Enrich.FromLogContext()
     .Enrich.WithProperty("service", "water-station-pusher")
     .WriteTo.Console(new CompactJsonFormatter())
@@ -108,4 +116,6 @@ static void ConfigureSerilog(LoggerConfiguration cfg) => cfg
         new CompactJsonFormatter(),
         "logs/water-station-pusher.log",
         rollingInterval: RollingInterval.Day,
-        retainedFileCountLimit: 7);
+        retainedFileCountLimit: 7,
+        fileSizeLimitBytes: 20_000_000,   // ~20 MB per file …
+        rollOnFileSizeLimit: true);       // … rolled + capped at 7 files: bounded regardless of volume

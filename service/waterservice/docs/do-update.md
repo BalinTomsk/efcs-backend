@@ -1,8 +1,8 @@
 # Deploy / update `water-station-pusher-cs` on DigitalOcean
 
 Runbook for building the C# (.NET 10) water service image and deploying it to the DigitalOcean droplet.
-Reflects the live deployment as of **2026-07-18** (release `10.0.1` — full-scale, all stations, with
-`RunOnStartup`).
+Reflects the live deployment as of **2026-07-18** (release `10.0.2` — full-scale, all stations, with
+`RunOnStartup`; `10.0.2` silenced the HttpClient/Polly per-request log flood).
 
 > **Never inline real secrets in this file.** Use placeholders. The GHCR PAT and the DB credentials are
 > read from a secure source at run time (see below). A committed credential is a leak.
@@ -198,6 +198,37 @@ docker exec water-station-pusher-cs curl -fsS http://localhost:8081/health/ready
 docker logs --tail 30 water-station-pusher-cs
 ```
 
+## Verify logs
+
+There are two JSON log streams; both live on the droplet.
+
+**1. Container stdout** (Docker `json-file`, rotated 3×10 MB) — quickest for "did it just start / crash":
+
+```bash
+docker logs -f water-station-pusher-cs                              # follow live
+docker logs --tail 50 water-station-pusher-cs                       # last 50 lines
+docker logs water-station-pusher-cs 2>&1 | grep '"@l":"Error"'      # errors only
+```
+
+**2. Persisted Serilog file on the attached volume** (survives container redeploys/reboots; daily roll,
+7-day retention) — read it directly on the droplet:
+
+```bash
+ls -l /mnt/volume_env/waterservice/logs/                            # rolling files (one per day)
+tail -f /mnt/volume_env/waterservice/logs/*.log                     # follow the current day
+grep -E '"@l":"(Error|Fatal|Warning)"' /mnt/volume_env/waterservice/logs/*.log | tail   # problems
+grep -E 'Station (pass|cycle) completed|Loaded supported stations' \
+  /mnt/volume_env/waterservice/logs/*.log | tail                    # cycle progress
+```
+
+**Cycle progress via metrics** — per-station lines are Debug-level (not emitted at the default Info level),
+so use the counter to confirm it is actively processing (it climbs during a run):
+
+```bash
+docker exec water-station-pusher-cs curl -fsS http://localhost:8081/metrics \
+  | grep '^water_station_processed_total'
+```
+
 ## Rollback
 
 ```bash
@@ -206,6 +237,7 @@ docker rm -f water-station-pusher-cs
 docker run -d --name water-station-pusher-cs --restart unless-stopped \
   --log-driver json-file --log-opt max-size=10m --log-opt max-file=3 \
   -v /mnt/volume_env/waterservice/waterservice.env:/run/secrets/waterservice.env:ro \
+  -v /mnt/volume_env/waterservice/logs:/app/logs \
   -e DOTENV_PATH=/run/secrets/waterservice.env -p 8080:8080 \
   ghcr.io/balintomsk/water-station-pusher-cs:$PREV_TAG
 ```
