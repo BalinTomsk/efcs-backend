@@ -32,17 +32,15 @@ This C# service is a **port of the Java `waterservice`** (Spring Boot) in the si
 **`auth`** — plus a combined image (`efj-backend/service/Dockerfile` + `start-services.sh`) that can run
 water + weather together in one container (`fishfind-station-services`).
 
-**Critical — same database.** The Java **`water-station-pusher`** runs on a different droplet
-(`debian-jnode` / `68.183.196.166`) but writes to the **same production DB** as this C# service and runs
-the same hourly post-processing procs (`sp_clean_old_water_data`, `spPushSpeciesFromLakeToStation`). While
-both run:
-
-- `dbo.WaterData` is written twice per cycle, and
-- those procs execute twice, concurrently.
-
-That is acceptable only as a **temporary overlap** (e.g. comparison during migration). To make this C#
-service the sole writer, **stop/retire the Java `water-station-pusher` first**. The Java deployment runbook
-is `efj-backend/service/waterservice/docs/do-update.md` (GHCR image
+**By design — dual-service redundancy (do NOT retire either).** The Java **`water-station-pusher`** runs on
+a different droplet (`debian-jnode` / `68.183.196.166`) and writes to the **same production DB** as this C#
+service, polling the same feeds *independently*. This is an **intentional "double warranty"** on incoming
+data — **keep both running.** Writes go through `dbo.sp_UpdateWaterData` keyed by `(mli, stamp)` as an
+upsert, so the two services' concurrent writes collapse to the same rows; if one pipeline is down, slow, or
+a feed fetch fails on one side, the other still lands the data. The post-processing procs
+(`sp_clean_old_water_data`, `spPushSpeciesFromLakeToStation`) therefore run once per service per cycle —
+expected and tolerated. The Java deployment runbook is
+`efj-backend/service/waterservice/docs/do-update.md` (GHCR image
 `ghcr.io/balintomsk/water-station-pusher`, env at `/mnt/volume_jnode/waterservice/waterservice.env` on
 `debian-jnode`). The Java `weather` and `auth` services are unrelated to this container and are not touched
 by this runbook.
@@ -227,9 +225,9 @@ docker run --rm \
 
 ## Operational notes
 
-- **Double-write with the Java service** — see [Related Java services](#related-java-services-coexistence--read-this)
-  at the top. The Java `water-station-pusher` on `debian-jnode` (`68.183.196.166`) writes to the same prod
-  DB and runs the same hourly procs; retire it to make this C# service the sole writer.
+- **Dual-service redundancy (Java + C#)** — see [Related Java services](#related-java-services-coexistence--read-this)
+  at the top. Both services intentionally run in parallel against the same prod DB as a "double warranty" on
+  incoming data (idempotent upserts by `(mli, stamp)`); **keep both running — do not retire either.**
 - **Timezone.** The container runs in UTC (persistence stores UTC wall-clock). Keep it that way.
 - **GHCR PAT rotation.** The PAT historically embedded in the Java runbook is considered leaked — rotate
   it and never paste a real PAT into this file.
