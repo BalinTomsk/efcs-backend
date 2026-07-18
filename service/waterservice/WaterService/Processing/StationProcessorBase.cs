@@ -47,9 +47,26 @@ public abstract class StationProcessorBase
             return;
         }
 
-        Logger.LogWarning(ex,
-            "{StationLabel} processing failed. station={Mli} state={State}.", StationLabel, mli, state);
+        // Concise: type + innermost message, NOT the full stack. Most failures here are transient network
+        // / parse issues on one station (the other service + next cycle cover it), so a multi-KB stack per
+        // failed station is noise. Raise this to a stack-carrying log only when diagnosing a specific bug.
+        Logger.LogWarning(
+            "{StationLabel} processing failed. station={Mli} state={State} error={Error}",
+            StationLabel, mli, state, Summarize(ex));
     }
 
     private string StationLabel => Country + " station";
+
+    /// <summary>Renders an exception as <c>Type: innermost message</c> for a compact one-line log.</summary>
+    private static string Summarize(Exception ex)
+    {
+        Exception innermost = ex;
+        while (innermost.InnerException is not null)
+        {
+            innermost = innermost.InnerException;
+        }
+        return innermost == ex
+            ? $"{ex.GetType().Name}: {ex.Message}"
+            : $"{ex.GetType().Name}: {ex.Message} -> {innermost.GetType().Name}: {innermost.Message}";
+    }
 }
