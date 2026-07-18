@@ -1,0 +1,34 @@
+target/
+ 
+
+### VS Code ###
+.vscode/
+service/OWMService/bin/*
+service/OWMService/obj/*
+service/OWMService/packages
+service/OWMService/Res/OWMService.reg
+service/OWMService/Res/OWMSservice
+.vs
+
+
+############################
+# Claude Code local settings (may contain machine-local allow-lists / secrets)
+############################
+**/.claude/settings.local.json
+
+############################
+# Claude Code project skills (local tooling, not part of the service)
+############################
+**/.claude/skills/
+
+############################
+# Application secrets
+############################
+**/secret/
+application.yml
+.env
+config.ini
+OWMService/Res/OWMService.reg
+
+Skills/*
+docs/*
