@@ -1,0 +1,26 @@
+# Build artifacts
+**/bin
+**/obj
+**/publish
+
+# Local logs
+logs
+**/logs
+
+# Secrets and local env — never bake into the image
+.env
+**/.env
+secret
+**/secret
+
+# IDE / VCS
+.git
+.gitignore
+.vs
+.vscode
+.idea
+**/*.user
+
+# Docs (not needed at runtime)
+docs
+README.md
