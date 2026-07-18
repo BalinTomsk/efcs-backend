@@ -10,7 +10,7 @@
          "Globalization Invariant Mode is not supported" at connection open. The runtime image
          installs ICU (libicu) instead. -->
     <!-- Version drives the /health "version" field; keep in step with the service release tag. -->
-    <Version>10.0.1</Version>
+    <Version>10.0.3</Version>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
   </PropertyGroup>
 

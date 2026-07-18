@@ -31,5 +31,5 @@ public sealed class WorkerOptions
     public int ReadTimeoutMs { get; set; } = 30000;
 
     /// <summary>Honest, identifying User-Agent sent to the public government feeds.</summary>
-    public string UserAgent { get; set; } = "water-station-pusher/10.0.1 (+https://fishfind.info)";
+    public string UserAgent { get; set; } = "water-station-pusher/10.0.3 (+https://fishfind.info)";
 }
