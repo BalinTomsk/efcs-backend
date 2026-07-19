@@ -22,6 +22,24 @@ cycle; that duplication is expected and tolerated.
 Deployments: this C# service runs on droplet **`debian-csnode`** (`137.184.218.128`); the Java service runs
 on **`debian-jnode`** (`68.183.196.166`). Each repo has its own `docs/do-update.md`.
 
+##IMPORTANT
+Explicitly follows database schema at:
+- @srv/../../envfish-db
+
+- Local project skills live under `.claude/skills` inside this service. When the user asks to run or
+  use a skill by name, you MUST first look for and use `.claude/skills/<skill-name>/SKILL.md`.
+  Only search repo-level `Skills` directories or global skill registries if that project-level file
+  does not exist.
+
+- **Before making ANY database change** (schema, stored proc, function, view, seed data, or any
+bug fix that touches the DB), **read `c:\envoinx\fishfind\envfish-db\CLAUDE.md `
+first** — it is the authoritative DB workflow (never edit the generated `ffi2.sql`; edit the
+`scriptNN_*.sql` sources; test-first: a FAILING unit test to confirm the bug, then a PASSING one
+to verify the fix; run `mssql\UNIT_TESTS\autorun.bat`). That file lives in the separate
+`efch-backend` repo and does NOT auto-load in this project, so it must be opened explicitly.
+
+
+
 ## Orientation
 
 - **Source of truth:** `docs/specification.md` (full spec — keep it in sync with the code). `README.md` for

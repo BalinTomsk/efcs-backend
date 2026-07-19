@@ -8,6 +8,7 @@ service/OWMService/obj/*
 service/OWMService/packages
 service/OWMService/Res/OWMService.reg
 service/OWMService/Res/OWMSservice
+service/waterservice/docs/*
 .vs
 
 
