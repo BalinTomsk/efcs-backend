@@ -21,11 +21,14 @@ public sealed class StationWorker : BackgroundService
 {
     private const string CorrelationIdProperty = "correlationId";
     private const string StationProperty = "station";
+    private const string ProviderCA = "environment-canada";
+    private const string ProviderUS = "usgs";
 
     private readonly WaterStationRepository _repo;
     private readonly StationProcessorCA _processorCA;
     private readonly StationProcessorUS _processorUS;
     private readonly StationPostProcessingService _postProcessing;
+    private readonly StationHttp503BackoffService _http503Backoff;
     private readonly WaterMetrics _metrics;
     private readonly WorkerOptions _options;
     private readonly ILogger<StationWorker> _log;
@@ -36,6 +39,7 @@ public sealed class StationWorker : BackgroundService
         StationProcessorCA processorCA,
         StationProcessorUS processorUS,
         StationPostProcessingService postProcessing,
+        StationHttp503BackoffService http503Backoff,
         WaterMetrics metrics,
         IOptions<WorkerOptions> options,
         ILogger<StationWorker> log)
@@ -44,6 +48,7 @@ public sealed class StationWorker : BackgroundService
         _processorCA = processorCA;
         _processorUS = processorUS;
         _postProcessing = postProcessing;
+        _http503Backoff = http503Backoff;
         _metrics = metrics;
         _options = options.Value;
         _log = log;
@@ -308,6 +313,8 @@ public sealed class StationWorker : BackgroundService
 
     private async Task<PassStats> RunOnceStatsAsync(string country, string? requestedMli, CancellationToken ct)
     {
+        DateOnly today = DateOnly.FromDateTime(DateTime.Today);
+        await _http503Backoff.RefreshDueAsync(today, ct).ConfigureAwait(false);
         IReadOnlyList<Domain.StationRef> stations = await _repo.FindSupportedAsync(country, ct).ConfigureAwait(false);
         _log.LogInformation("Loaded supported stations. country={Country} count={Count} requestedStation={Requested}",
             country, stations.Count,
@@ -342,14 +349,26 @@ public sealed class StationWorker : BackgroundService
             }
             anyProcessed = true;
 
-            bool ok;
+            ProcessingOutcome outcome;
             using (LogContext.PushProperty(StationProperty, station.Mli))
             {
-                ok = await ProcessStationAsync(country, station.Mli, station.State, station.Tz, ct)
+                outcome = await ProcessStationAsync(country, station.Mli, station.State, station.Tz, ct)
                     .ConfigureAwait(false);
             }
 
+            bool ok = outcome == ProcessingOutcome.Processed;
             _metrics.StationProcessed(country, ok);
+            if (ok)
+            {
+                await _http503Backoff.RecordProcessedAsync(ProviderFor(country), country, station, ct)
+                    .ConfigureAwait(false);
+            }
+            else if (outcome == ProcessingOutcome.FailedHttp503)
+            {
+                await _http503Backoff.RecordHttp503Async(ProviderFor(country), country, station, today, ct)
+                    .ConfigureAwait(false);
+            }
+
             lastProcessedStation = station.Mli;
             if (ok)
             {
@@ -368,11 +387,19 @@ public sealed class StationWorker : BackgroundService
         return new PassStats(country, succeeded, failed, lastProcessedStation, lastFailedStation);
     }
 
-    private Task<bool> ProcessStationAsync(string country, string mli, string state, int tz, CancellationToken ct) =>
+    private Task<ProcessingOutcome> ProcessStationAsync(string country, string mli, string state, int tz, CancellationToken ct) =>
         country switch
         {
-            "CA" => _processorCA.ProcessAsync(mli, state, tz, ct),
-            "US" => _processorUS.ProcessAsync(mli, state, tz, ct),
+            "CA" => _processorCA.ProcessWithOutcomeAsync(mli, state, tz, ct),
+            "US" => _processorUS.ProcessWithOutcomeAsync(mli, state, tz, ct),
+            _ => throw new ArgumentException("Unsupported country " + country, nameof(country)),
+        };
+
+    private static string ProviderFor(string country) =>
+        country switch
+        {
+            "CA" => ProviderCA,
+            "US" => ProviderUS,
             _ => throw new ArgumentException("Unsupported country " + country, nameof(country)),
         };
 
