@@ -8,7 +8,7 @@ namespace WaterService.Configuration;
 /// .NET service.
 ///
 /// <para>Example input:
-/// <c>jdbc:sqlserver://s31.winhost.com:1433;databaseName=DB_x;encrypt=true;trustServerCertificate=true</c></para>
+/// <c>jdbc:sqlserver://testserver.example.com:1433;databaseName=DB_x;encrypt=true;trustServerCertificate=true</c></para>
 ///
 /// <para>If <c>DB_URL</c> is already a native SqlClient connection string (contains <c>Server=</c> or
 /// <c>Data Source=</c>), it is used as-is with credentials merged in.</para>

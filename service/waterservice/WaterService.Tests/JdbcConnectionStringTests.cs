@@ -10,12 +10,12 @@ public class JdbcConnectionStringTests
     public void Build_ConvertsJdbcUrl_ToSqlClientConnectionString()
     {
         string result = JdbcConnectionString.Build(
-            "jdbc:sqlserver://s31.winhost.com:1433;databaseName=DB_x;encrypt=true;trustServerCertificate=true",
+            "jdbc:sqlserver://testserver.example.com:1433;databaseName=DB_x;encrypt=true;trustServerCertificate=true",
             "the_user",
             "the_pass");
 
         var builder = new SqlConnectionStringBuilder(result);
-        Assert.Equal("s31.winhost.com,1433", builder.DataSource);
+        Assert.Equal("testserver.example.com,1433", builder.DataSource);
         Assert.Equal("DB_x", builder.InitialCatalog);
         Assert.Equal("the_user", builder.UserID);
         Assert.Equal("the_pass", builder.Password);
