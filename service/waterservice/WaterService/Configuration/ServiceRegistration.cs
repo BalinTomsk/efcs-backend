@@ -47,11 +47,13 @@ public static class ServiceRegistration
         services.AddSingleton<WaterMetrics>();
         services.AddSingleton<WaterStationRepository>();
         services.AddSingleton<WaterDataRepository>();
+        services.AddSingleton<IStationHttp503BackoffRepository, StationHttp503BackoffRepository>();
         services.AddSingleton<CsvFetcherCA>();
         services.AddSingleton<XmlFetcherUS>();
         services.AddSingleton<StationProcessorCA>();
         services.AddSingleton<StationProcessorUS>();
         services.AddSingleton<StationPostProcessingService>();
+        services.AddSingleton<StationHttp503BackoffService>();
         services.AddSingleton<StationWorker>();
 
         return services;

@@ -1,3 +1,4 @@
+using System.Net;
 using Microsoft.Extensions.Logging;
 
 namespace WaterService.Processing;
@@ -15,17 +16,22 @@ public abstract class StationProcessorBase
     /// <c>true</c> when the station was processed without error; <c>false</c> when an exception was
     /// handled (a failure, or an unpublished / skipped source).
     /// </returns>
-    public async Task<bool> ProcessAsync(string mli, string state, int tz, CancellationToken ct)
+    public async Task<bool> ProcessAsync(string mli, string state, int tz, CancellationToken ct) =>
+        await ProcessWithOutcomeAsync(mli, state, tz, ct).ConfigureAwait(false) == ProcessingOutcome.Processed;
+
+    /// <summary>
+    /// Processes a single station and returns the handled outcome.
+    /// </summary>
+    public async Task<ProcessingOutcome> ProcessWithOutcomeAsync(string mli, string state, int tz, CancellationToken ct)
     {
         try
         {
             await ProcessStationAsync(mli, state, tz, ct).ConfigureAwait(false);
-            return true;
+            return ProcessingOutcome.Processed;
         }
         catch (Exception ex)
         {
-            HandleProcessingException(mli, state, ex);
-            return false;
+            return HandleProcessingException(mli, state, ex);
         }
     }
 
@@ -37,14 +43,14 @@ public abstract class StationProcessorBase
 
     protected abstract string MissingSourceDescription { get; }
 
-    private void HandleProcessingException(string mli, string state, Exception ex)
+    private ProcessingOutcome HandleProcessingException(string mli, string state, Exception ex)
     {
         if (ex is FileNotFoundException)
         {
             Logger.LogDebug(
                 "Skipping {StationLabel} with no published {MissingSource}. station={Mli} state={State}",
                 StationLabel, MissingSourceDescription, mli, state);
-            return;
+            return ProcessingOutcome.Skipped;
         }
 
         // Concise: type + innermost message, NOT the full stack. Most failures here are transient network
@@ -53,6 +59,7 @@ public abstract class StationProcessorBase
         Logger.LogWarning(
             "{StationLabel} processing failed. station={Mli} state={State} error={Error}",
             StationLabel, mli, state, Summarize(ex));
+        return IsHttp503(ex) ? ProcessingOutcome.FailedHttp503 : ProcessingOutcome.Failed;
     }
 
     private string StationLabel => Country + " station";
@@ -68,5 +75,16 @@ public abstract class StationProcessorBase
         return innermost == ex
             ? $"{ex.GetType().Name}: {ex.Message}"
             : $"{ex.GetType().Name}: {ex.Message} -> {innermost.GetType().Name}: {innermost.Message}";
+    }
+
+    private static bool IsHttp503(Exception ex)
+    {
+        if (ex is HttpRequestException { StatusCode: HttpStatusCode.ServiceUnavailable })
+        {
+            return true;
+        }
+
+        string? message = ex.Message;
+        return message is not null && message.Contains("HTTP 503", StringComparison.OrdinalIgnoreCase);
     }
 }
