@@ -19,6 +19,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="..\docs\**\*" Link="docs\%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- SQL Server driver (cross-platform, runs on Debian in the container). -->
     <PackageReference Include="Microsoft.Data.SqlClient" Version="6.0.2" />
     <!-- Fault-tolerant CSV parsing for the Environment Canada feed (commons-csv equivalent). -->
