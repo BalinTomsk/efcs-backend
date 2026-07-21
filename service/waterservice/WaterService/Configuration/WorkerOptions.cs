@@ -18,6 +18,14 @@ public sealed class WorkerOptions
     /// </summary>
     public bool RunOnStartup { get; set; } = false;
 
+    /// <summary>
+    /// When set, runs a startup verification that processes only the specified station(s) on startup
+    /// before scheduling begins. Useful for deployment verification to ensure the service can process
+    /// at least one station successfully without running a full cycle. Comma-separated list of MLIs.
+    /// Example: "02HA014" or "02HA014,USGS-01646500". Takes precedence over <c>RunOnStartup</c>.
+    /// </summary>
+    public string? StartupVerificationStations { get; set; } = null;
+
     /// <summary>Cron expression (6-field, seconds first) — default: top of every hour.</summary>
     public string Cron { get; set; } = "0 0 * * * *";
 
