@@ -60,7 +60,58 @@ public sealed class StationWorker : BackgroundService
 
         _log.LogInformation("Scheduled station cycle. cron=\"{Cron}\"", _options.Cron);
 
-        if (_options.RunOnStartup)
+        // Startup verification: process specific station(s) to verify deployment health
+        if (!string.IsNullOrWhiteSpace(_options.StartupVerificationStations))
+        {
+            string[] verificationStations = _options.StartupVerificationStations
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            _log.LogInformation(
+                "StartupVerificationStations enabled — processing {Count} station(s) for deployment verification: {Stations}",
+                verificationStations.Length,
+                string.Join(", ", verificationStations));
+
+            DateTime startupUtc = DateTime.UtcNow;
+            int totalProcessed = 0;
+            try
+            {
+                foreach (string mli in verificationStations)
+                {
+                    int processed = await RunCycleAsync(mli, stoppingToken).ConfigureAwait(false);
+                    totalProcessed += processed;
+                    if (processed > 0)
+                    {
+                        _log.LogInformation("Startup verification: station {MLI} processed successfully.", mli);
+                    }
+                    else
+                    {
+                        _log.LogWarning("Startup verification: station {MLI} was not processed (may not exist or be supported).", mli);
+                    }
+                }
+
+                if (totalProcessed == 0)
+                {
+                    _log.LogError("Startup verification: FAILED — no stations were processed successfully. Check station MLIs and upstream feed availability.");
+                }
+                else
+                {
+                    _log.LogInformation("Startup verification: SUCCESS — {Count} station(s) processed successfully.", totalProcessed);
+                }
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex, "Startup verification cycle failed.");
+            }
+            finally
+            {
+                RecordCycleOutcome(startupUtc, DateTime.UtcNow);
+            }
+        }
+        else if (_options.RunOnStartup)
         {
             _log.LogInformation("RunOnStartup enabled — running an immediate full cycle before scheduling.");
             DateTime startupUtc = DateTime.UtcNow;
