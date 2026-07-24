@@ -1,13 +1,13 @@
 using Microsoft.Data.SqlClient;
+using TUnit.Core;
 using WaterService.Configuration;
-using Xunit;
 
 namespace WaterService.Tests;
 
 public class JdbcConnectionStringTests
 {
-    [Fact]
-    public void Build_ConvertsJdbcUrl_ToSqlClientConnectionString()
+    [Test]
+    public async Task Build_ConvertsJdbcUrl_ToSqlClientConnectionString()
     {
         string result = JdbcConnectionString.Build(
             "jdbc:sqlserver://testserver.example.com:1433;databaseName=DB_x;encrypt=true;trustServerCertificate=true",
@@ -15,40 +15,40 @@ public class JdbcConnectionStringTests
             "the_pass");
 
         var builder = new SqlConnectionStringBuilder(result);
-        Assert.Equal("testserver.example.com,1433", builder.DataSource);
-        Assert.Equal("DB_x", builder.InitialCatalog);
-        Assert.Equal("the_user", builder.UserID);
-        Assert.Equal("the_pass", builder.Password);
-        Assert.True(builder.Encrypt);
-        Assert.True(builder.TrustServerCertificate);
+        await Assert.That(builder.DataSource).IsEqualTo("testserver.example.com,1433");
+        await Assert.That(builder.InitialCatalog).IsEqualTo("DB_x");
+        await Assert.That(builder.UserID).IsEqualTo("the_user");
+        await Assert.That(builder.Password).IsEqualTo("the_pass");
+        await Assert.That(builder.Encrypt).IsNotEqualTo(Microsoft.Data.SqlClient.SqlConnectionEncryptOption.Optional);
+        await Assert.That(builder.TrustServerCertificate).IsTrue();
     }
 
-    [Fact]
-    public void Build_HostWithoutPort_KeepsHostAsDataSource()
+    [Test]
+    public async Task Build_HostWithoutPort_KeepsHostAsDataSource()
     {
         string result = JdbcConnectionString.Build(
             "jdbc:sqlserver://localhost;databaseName=fish", "u", "p");
 
         var builder = new SqlConnectionStringBuilder(result);
-        Assert.Equal("localhost", builder.DataSource);
-        Assert.Equal("fish", builder.InitialCatalog);
+        await Assert.That(builder.DataSource).IsEqualTo("localhost");
+        await Assert.That(builder.InitialCatalog).IsEqualTo("fish");
     }
 
-    [Fact]
-    public void Build_NativeConnectionString_PassesThroughAndMergesCredentials()
+    [Test]
+    public async Task Build_NativeConnectionString_PassesThroughAndMergesCredentials()
     {
         string result = JdbcConnectionString.Build(
             "Server=foo;Database=bar", "u", "p");
 
         var builder = new SqlConnectionStringBuilder(result);
-        Assert.Equal("foo", builder.DataSource);
-        Assert.Equal("bar", builder.InitialCatalog);
-        Assert.Equal("u", builder.UserID);
-        Assert.Equal("p", builder.Password);
+        await Assert.That(builder.DataSource).IsEqualTo("foo");
+        await Assert.That(builder.InitialCatalog).IsEqualTo("bar");
+        await Assert.That(builder.UserID).IsEqualTo("u");
+        await Assert.That(builder.Password).IsEqualTo("p");
     }
 
-    [Fact]
-    public void Build_DoesNotOverrideCredentialsAlreadyInUrl()
+    [Test]
+    public async Task Build_DoesNotOverrideCredentialsAlreadyInUrl()
     {
         string result = JdbcConnectionString.Build(
             "jdbc:sqlserver://h:1433;databaseName=d;user=urluser;password=urlpass",
@@ -56,13 +56,14 @@ public class JdbcConnectionStringTests
             "argPass");
 
         var builder = new SqlConnectionStringBuilder(result);
-        Assert.Equal("urluser", builder.UserID);
-        Assert.Equal("urlpass", builder.Password);
+        await Assert.That(builder.UserID).IsEqualTo("urluser");
+        await Assert.That(builder.Password).IsEqualTo("urlpass");
     }
 
-    [Fact]
-    public void Build_BlankUrl_Throws()
+    [Test]
+    public async Task Build_BlankUrl_Throws()
     {
-        Assert.Throws<ArgumentException>(() => JdbcConnectionString.Build("", "u", "p"));
+        await Assert.That(() => JdbcConnectionString.Build("", "u", "p"))
+            .Throws<ArgumentException>();
     }
 }

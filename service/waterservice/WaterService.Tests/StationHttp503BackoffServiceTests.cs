@@ -1,8 +1,8 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using TUnit.Core;
 using WaterService.Data;
 using WaterService.Domain;
 using WaterService.Processing;
-using Xunit;
 
 namespace WaterService.Tests;
 
@@ -10,7 +10,7 @@ public class StationHttp503BackoffServiceTests
 {
     private static readonly StationRef Station = new("02JE025", "QC", -5);
 
-    [Fact]
+    [Test]
     public async Task RecordHttp503_ForwardsProviderCountryStationStateAndDate()
     {
         var repository = new FakeRepository();
@@ -21,14 +21,14 @@ public class StationHttp503BackoffServiceTests
 
         await service.RecordHttp503Async("environment-canada", "CA", Station, today);
 
-        Assert.Equal("environment-canada", repository.RecordedProvider);
-        Assert.Equal("CA", repository.RecordedCountry);
-        Assert.Equal("02JE025", repository.RecordedStationMli);
-        Assert.Equal("QC", repository.RecordedState);
-        Assert.Equal(today, repository.RecordedToday);
+        await Assert.That(repository.RecordedProvider).IsEqualTo("environment-canada");
+        await Assert.That(repository.RecordedCountry).IsEqualTo("CA");
+        await Assert.That(repository.RecordedStationMli).IsEqualTo("02JE025");
+        await Assert.That(repository.RecordedState).IsEqualTo("QC");
+        await Assert.That(repository.RecordedToday).IsEqualTo(today);
     }
 
-    [Fact]
+    [Test]
     public async Task RecordProcessed_ResetsStationBackoff()
     {
         var repository = new FakeRepository();
@@ -38,12 +38,12 @@ public class StationHttp503BackoffServiceTests
 
         await service.RecordProcessedAsync("environment-canada", "CA", Station);
 
-        Assert.Equal("environment-canada", repository.ResetProvider);
-        Assert.Equal("CA", repository.ResetCountry);
-        Assert.Equal("02JE025", repository.ResetStationMli);
+        await Assert.That(repository.ResetProvider).IsEqualTo("environment-canada");
+        await Assert.That(repository.ResetCountry).IsEqualTo("CA");
+        await Assert.That(repository.ResetStationMli).IsEqualTo("02JE025");
     }
 
-    [Fact]
+    [Test]
     public async Task RefreshDue_ForwardsDate()
     {
         var repository = new FakeRepository();
@@ -54,7 +54,7 @@ public class StationHttp503BackoffServiceTests
 
         await service.RefreshDueAsync(today);
 
-        Assert.Equal(today, repository.RefreshedToday);
+        await Assert.That(repository.RefreshedToday).IsEqualTo(today);
     }
 
     private sealed class FakeRepository : IStationHttp503BackoffRepository
