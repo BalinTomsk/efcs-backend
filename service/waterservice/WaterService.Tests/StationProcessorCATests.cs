@@ -1,8 +1,8 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using TUnit.Core;
 using WaterService.Domain;
 using WaterService.Processing;
 using WaterService.Web;
-using Xunit;
 
 namespace WaterService.Tests;
 
@@ -13,22 +13,23 @@ public class StationProcessorCATests
 
     private const string Header = "ID,Date,Level,Grade,Symbol,QAQC,Discharge";
 
-    [Fact]
-    public void Parse_ValidRow_MapsColumns()
+    [Test]
+    public async Task Parse_ValidRow_MapsColumns()
     {
         string csv = Header + "\n05BB001,2024-06-01T05:00:00-06:00,1.234,,,,45.6";
 
         List<Reading> readings = NewProcessor().Parse(csv, "05BB001");
 
-        Reading reading = Assert.Single(readings);
-        Assert.Equal("05BB001", reading.StationId);
-        Assert.Equal(1.234, reading.WaterLevel);
-        Assert.Equal(45.6, reading.Discharge);
-        Assert.Equal(new TimeSpan(-6, 0, 0), reading.Stamp.Offset);
+        await Assert.That(readings).HasCount().EqualTo(1);
+        Reading reading = readings[0];
+        await Assert.That(reading.StationId).IsEqualTo("05BB001");
+        await Assert.That(reading.WaterLevel).IsEqualTo(1.234);
+        await Assert.That(reading.Discharge).IsEqualTo(45.6);
+        await Assert.That(reading.Stamp.Offset).IsEqualTo(new TimeSpan(-6, 0, 0));
     }
 
-    [Fact]
-    public void Parse_SkipsHeaderShortBlankAndMalformedRows_ButKeepsGoodOnes()
+    [Test]
+    public async Task Parse_SkipsHeaderShortBlankAndMalformedRows_ButKeepsGoodOnes()
     {
         string csv = string.Join("\n",
             Header,
@@ -39,25 +40,28 @@ public class StationProcessorCATests
 
         List<Reading> readings = NewProcessor().Parse(csv, "05BB001");
 
-        Reading reading = Assert.Single(readings);
-        Assert.Equal("05BB001", reading.StationId);
-        Assert.Equal(1.5, reading.WaterLevel);
+        await Assert.That(readings).HasCount().EqualTo(1);
+        Reading reading = readings[0];
+        await Assert.That(reading.StationId).IsEqualTo("05BB001");
+        await Assert.That(reading.WaterLevel).IsEqualTo(1.5);
     }
 
-    [Fact]
-    public void Parse_EmptyDischarge_YieldsNull()
+    [Test]
+    public async Task Parse_EmptyDischarge_YieldsNull()
     {
         string csv = Header + "\n05BB001,2024-06-01T05:00:00-06:00,1.5,,,,";
 
-        Reading reading = Assert.Single(NewProcessor().Parse(csv, "05BB001"));
-        Assert.Null(reading.Discharge);
-        Assert.Equal(1.5, reading.WaterLevel);
+        List<Reading> readings = NewProcessor().Parse(csv, "05BB001");
+        await Assert.That(readings).HasCount().EqualTo(1);
+        Reading reading = readings[0];
+        await Assert.That(reading.Discharge).IsNull();
+        await Assert.That(reading.WaterLevel).IsEqualTo(1.5);
     }
 
-    [Fact]
-    public void Parse_BlankInput_ReturnsEmpty()
+    [Test]
+    public async Task Parse_BlankInput_ReturnsEmpty()
     {
-        Assert.Empty(NewProcessor().Parse("", "05BB001"));
-        Assert.Empty(NewProcessor().Parse("   ", "05BB001"));
+        await Assert.That(NewProcessor().Parse("", "05BB001")).IsEmpty();
+        await Assert.That(NewProcessor().Parse("   ", "05BB001")).IsEmpty();
     }
 }

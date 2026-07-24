@@ -1,26 +1,26 @@
 using System.Net;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using TUnit.Core;
 using WaterService.Processing;
-using Xunit;
 
 namespace WaterService.Tests;
 
 public class StationProcessorBaseTests
 {
-    [Fact]
+    [Test]
     public async Task SuccessPath_ReturnsProcessed_AndBoolCompatibilityReturnsTrue()
     {
         var processor = new TestProcessor();
 
-        Assert.Equal(
-            ProcessingOutcome.Processed,
-            await processor.ProcessWithOutcomeAsync("02JE025", "QC", -5, CancellationToken.None));
-        Assert.True(await processor.ProcessAsync("02JE025", "QC", -5, CancellationToken.None));
-        Assert.Equal(2, processor.ProcessedCount);
+        await Assert.That(await processor.ProcessWithOutcomeAsync("02JE025", "QC", -5, CancellationToken.None))
+            .IsEqualTo(ProcessingOutcome.Processed);
+        await Assert.That(await processor.ProcessAsync("02JE025", "QC", -5, CancellationToken.None))
+            .IsTrue();
+        await Assert.That(processor.ProcessedCount).IsEqualTo(2);
     }
 
-    [Fact]
+    [Test]
     public async Task FileNotFound_ReturnsSkipped_AndBoolCompatibilityReturnsFalse()
     {
         var processor = new TestProcessor
@@ -28,13 +28,13 @@ public class StationProcessorBaseTests
             ToThrow = new FileNotFoundException("no feed"),
         };
 
-        Assert.Equal(
-            ProcessingOutcome.Skipped,
-            await processor.ProcessWithOutcomeAsync("02JE025", "QC", -5, CancellationToken.None));
-        Assert.False(await processor.ProcessAsync("02JE025", "QC", -5, CancellationToken.None));
+        await Assert.That(await processor.ProcessWithOutcomeAsync("02JE025", "QC", -5, CancellationToken.None))
+            .IsEqualTo(ProcessingOutcome.Skipped);
+        await Assert.That(await processor.ProcessAsync("02JE025", "QC", -5, CancellationToken.None))
+            .IsFalse();
     }
 
-    [Fact]
+    [Test]
     public async Task HttpRequestServiceUnavailable_ReturnsHttp503Failure()
     {
         var processor = new TestProcessor
@@ -45,12 +45,11 @@ public class StationProcessorBaseTests
                 statusCode: HttpStatusCode.ServiceUnavailable),
         };
 
-        Assert.Equal(
-            ProcessingOutcome.FailedHttp503,
-            await processor.ProcessWithOutcomeAsync("08313000", "NY", -5, CancellationToken.None));
+        await Assert.That(await processor.ProcessWithOutcomeAsync("08313000", "NY", -5, CancellationToken.None))
+            .IsEqualTo(ProcessingOutcome.FailedHttp503);
     }
 
-    [Fact]
+    [Test]
     public async Task MessageContainingHttp503_ReturnsHttp503Failure()
     {
         var processor = new TestProcessor
@@ -58,12 +57,11 @@ public class StationProcessorBaseTests
             ToThrow = new IOException("HTTP 503"),
         };
 
-        Assert.Equal(
-            ProcessingOutcome.FailedHttp503,
-            await processor.ProcessWithOutcomeAsync("02JE025", "QC", -5, CancellationToken.None));
+        await Assert.That(await processor.ProcessWithOutcomeAsync("02JE025", "QC", -5, CancellationToken.None))
+            .IsEqualTo(ProcessingOutcome.FailedHttp503);
     }
 
-    [Fact]
+    [Test]
     public async Task OtherException_ReturnsFailed()
     {
         var processor = new TestProcessor
@@ -71,9 +69,8 @@ public class StationProcessorBaseTests
             ToThrow = new InvalidOperationException("bad payload"),
         };
 
-        Assert.Equal(
-            ProcessingOutcome.Failed,
-            await processor.ProcessWithOutcomeAsync("02JE025", "QC", -5, CancellationToken.None));
+        await Assert.That(await processor.ProcessWithOutcomeAsync("02JE025", "QC", -5, CancellationToken.None))
+            .IsEqualTo(ProcessingOutcome.Failed);
     }
 
     private sealed class TestProcessor : StationProcessorBase
