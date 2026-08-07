@@ -132,7 +132,7 @@ may not.**
 ---
 
 > **Entries below 10.1.0 were reconstructed on 2026-08-06** from git history and the image build dates on
-> the droplet (`docker images ghcr.io/balintomsk/water-station-pusher-cs`) — this file did not exist while
+> the droplet (`docker images` for this service) — this file did not exist while
 > they were released, and no `10.0.4` image was ever built. Dates are **image build dates** (when the
 > release actually shipped), which run ahead of the commit dates. Treat the grouping as best-effort.
 

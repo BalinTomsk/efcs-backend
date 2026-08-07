@@ -96,15 +96,15 @@ to verify the fix; run `mssql\UNIT_TESTS\autorun.bat`). That file lives in the s
 | Service | `water-station-pusher` (C# / .NET 10 port) |
 | Local Docker engine | Rancher Desktop (dockerd inside the `rancher-desktop` WSL VM) |
 | Registry | GitHub Container Registry (GHCR) |
-| GHCR image | `ghcr.io/balintomsk/water-station-pusher-cs:<TAG>` |
-| GHCR user | `BalinTomsk` |
-| Droplet | `root@137.184.218.128` (`debian-csnode`, Debian 13, amd64) |
-| Container name | `water-station-pusher-cs` |
-| Attached volume | `volume-env` → `/mnt/volume_env` (ext4; persisted via a `nofail` fstab entry) |
-| Env file on droplet | `/mnt/volume_env/waterservice/waterservice.env` (owner `10001:10001`, mode `0400`) |
-| Container env mount | `/run/secrets/waterservice.env` (read via `DOTENV_PATH`) |
-| Logs on droplet | `/mnt/volume_env/waterservice/logs` → `/app/logs` (Serilog JSON, daily roll, 7-day retention) |
+| Runtime target | Docker on Debian 13 (amd64), non-root uid 10001 |
+| Env delivery | a mounted env file read via `DOTENV_PATH`; `enc:v1:` values need `FF_MASTER_KEY_FILE` |
+| Logs | Serilog JSON to `/app/logs` (bind-mount a volume there), daily roll, 7-day retention |
 | Published port | `8080` (health). `8081` (metrics/liveness/readiness) is **not** published |
+
+> **Deployment specifics are deliberately not in this repo.** Host addresses, image coordinates, volume
+> and secret paths live in `docs/do-update.md`, which is git-ignored and stays on the workstation. This
+> repository is **public** — do not reintroduce them here, in `README.md`, or in `CHANGELOG.md`.
+
 ---
 
 ## Goal
