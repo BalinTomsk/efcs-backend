@@ -117,6 +117,10 @@ public static class ResiliencePipelines
         {
             HttpRequestException => true,
             TimeoutException => true,
+            // A response body that dies mid-read (premature EOF, chunked-encoding error) surfaces as an
+            // HttpIOException : IOException from the CONTENT read, never as an HttpRequestException.
+            // The FileNotFoundException guard above keeps 404-skips out of this branch.
+            IOException => true,
             // HttpClient surfaces a request/connect timeout as a cancellation with a TimeoutException inner.
             TaskCanceledException tce => tce.InnerException is TimeoutException,
             _ => false,

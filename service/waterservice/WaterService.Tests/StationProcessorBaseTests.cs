@@ -1,6 +1,7 @@
 using System.Net;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Polly.CircuitBreaker;
 using TUnit.Core;
 using WaterService.Processing;
 
@@ -59,6 +60,20 @@ public class StationProcessorBaseTests
 
         await Assert.That(await processor.ProcessWithOutcomeAsync("02JE025", "QC", -5, CancellationToken.None))
             .IsEqualTo(ProcessingOutcome.FailedHttp503);
+    }
+
+    [Test]
+    public async Task OpenCircuitBreaker_ReturnsUpstreamOpenFailure()
+    {
+        // Distinct from a plain failure: the feed is down, not the station, so the worker stops the pass
+        // instead of short-circuiting every remaining station one by one.
+        var processor = new TestProcessor
+        {
+            ToThrow = new BrokenCircuitException("The circuit is now open and is not allowing calls."),
+        };
+
+        await Assert.That(await processor.ProcessWithOutcomeAsync("08313000", "NY", -5, CancellationToken.None))
+            .IsEqualTo(ProcessingOutcome.FailedUpstreamOpen);
     }
 
     [Test]

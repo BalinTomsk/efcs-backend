@@ -65,7 +65,10 @@ public sealed class StationWorker : BackgroundService
 
         _log.LogInformation("Scheduled station cycle. cron=\"{Cron}\"", _options.Cron);
 
-        // Startup verification: process specific station(s) to verify deployment health
+        // Startup verification: process specific station(s) to verify deployment health.
+        // LOG-LEVEL POLICY: everything in this block that reports a successful start stays at Information
+        // (failures at Warning/Error) so a deploy can be verified without enabling Debug. Per-station
+        // chatter may be demoted for volume; these may not. Pinned by StationWorkerTests — see CHANGELOG.md.
         if (!string.IsNullOrWhiteSpace(_options.StartupVerificationStations))
         {
             string[] verificationStations = _options.StartupVerificationStations
@@ -357,7 +360,7 @@ public sealed class StationWorker : BackgroundService
             }
 
             bool ok = outcome == ProcessingOutcome.Processed;
-            _metrics.StationProcessed(country, ok);
+            _metrics.StationProcessed(country, outcome);
             if (ok)
             {
                 await _http503Backoff.RecordProcessedAsync(ProviderFor(country), country, station, ct)
@@ -378,6 +381,16 @@ public sealed class StationWorker : BackgroundService
             {
                 failed++;
                 lastFailedStation = station.Mli;
+
+                // The feed itself is down, so every remaining station would fail the same way. Abandon
+                // the pass and let the next cycle retry once the breaker has had time to close.
+                if (outcome == ProcessingOutcome.FailedUpstreamOpen)
+                {
+                    _log.LogWarning(
+                        "Stopping station pass because upstream feed is unavailable. country={Country} station={Mli} state={State}",
+                        country, station.Mli, station.State);
+                    break;
+                }
             }
 
             _log.LogDebug("Processed station. country={Country} station={Mli} state={State}",

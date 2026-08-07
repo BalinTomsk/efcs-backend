@@ -1,5 +1,6 @@
 using System.Net;
 using Microsoft.Extensions.Logging;
+using Polly.CircuitBreaker;
 
 namespace WaterService.Processing;
 
@@ -22,7 +23,7 @@ public abstract class StationProcessorBase
     /// <summary>
     /// Processes a single station and returns the handled outcome.
     /// </summary>
-    public async Task<ProcessingOutcome> ProcessWithOutcomeAsync(string mli, string state, int tz, CancellationToken ct)
+    public virtual async Task<ProcessingOutcome> ProcessWithOutcomeAsync(string mli, string state, int tz, CancellationToken ct)
     {
         try
         {
@@ -51,6 +52,18 @@ public abstract class StationProcessorBase
                 "Skipping {StationLabel} with no published {MissingSource}. station={Mli} state={State}",
                 StationLabel, MissingSourceDescription, mli, state);
             return ProcessingOutcome.Skipped;
+        }
+
+        // An open breaker means the whole feed is down, not this one station: every remaining station in
+        // the pass would be short-circuited the same way. Reported distinctly so the worker can stop the
+        // pass instead of marching through thousands of stations logging identical failures.
+        if (ex is BrokenCircuitException)
+        {
+            Logger.LogWarning(
+                "{StationLabel} processing stopped because upstream circuit breaker is open. "
+                + "station={Mli} state={State} error={Error}",
+                StationLabel, mli, state, Summarize(ex));
+            return ProcessingOutcome.FailedUpstreamOpen;
         }
 
         // Concise: type + innermost message, NOT the full stack. Most failures here are transient network
