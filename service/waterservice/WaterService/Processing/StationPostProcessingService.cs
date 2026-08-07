@@ -6,7 +6,7 @@ namespace WaterService.Processing;
 /// <summary>
 /// Runs the synchronous stored procedures that must happen after a station-processing cycle completes.
 /// </summary>
-public sealed class StationPostProcessingService
+public class StationPostProcessingService
 {
     private readonly WaterDataRepository _waterDataRepository;
     private readonly ILogger<StationPostProcessingService> _log;
@@ -20,14 +20,14 @@ public sealed class StationPostProcessingService
     }
 
     /// <summary>Pushes lake species associations down to stations after a successful cycle.</summary>
-    public async Task RunAfterStationProcessingAsync(CancellationToken ct = default)
+    public virtual async Task RunAfterStationProcessingAsync(CancellationToken ct = default)
     {
         _log.LogInformation("Running post-processing procedure {Procedure}", "spPushSpeciesFromLakeToStation");
         await _waterDataRepository.PushSpeciesFromLakeToStationAsync(ct).ConfigureAwait(false);
     }
 
     /// <summary>Cleanup that must run after every cycle, even if no station was processed successfully.</summary>
-    public async Task CleanOldWaterDataAsync(CancellationToken ct = default)
+    public virtual async Task CleanOldWaterDataAsync(CancellationToken ct = default)
     {
         _log.LogInformation("Running post-processing procedure {Procedure}", "sp_clean_old_water_data");
         await _waterDataRepository.CleanOldWaterDataAsync(ct).ConfigureAwait(false);

@@ -1,0 +1,215 @@
+# Changelog — `water-station-pusher` (C# / .NET 10)
+
+All notable changes to this service go **in this file**. See [Changelog rules](#changelog-rules) at the
+bottom before adding an entry.
+
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The version stamp lives in
+`WaterService/WaterService.csproj` (`<Version>`) and is surfaced by `/health`; keep the two in step.
+
+---
+
+## [Unreleased]
+
+_Nothing yet._
+
+---
+
+## [10.1.1] — 2026-08-06
+
+Metric-correctness patch over `10.1.0`. No deployment changes — the master key mount introduced by `10.1.0`
+is still required, nothing new is.
+
+### Fixed
+
+- **`water_station_processed_total` no longer counts skipped stations as failures.** ⚠️ **Breaking change to
+  the metric's meaning — see the dashboard/alert note below.** `StationWorker` collapsed every non-`Processed`
+  outcome into a bool, so `ProcessingOutcome.Skipped` — which only means the upstream feed publishes no data
+  for that station (HTTP 404), the normal case for most of the CA fleet — was recorded as
+  `outcome="failure"`. Observed on 2026-08-06 during the 00:00 UTC cycle (release `10.1.0`): CA reported
+  **2 success / 44 "failure"** while the logs contained **zero** "CA station processing failed" warnings —
+  all 44 were skips. The metric read as a near-total CA outage on a healthy service, and any genuine failure
+  was buried in that noise.
+
+  `WaterMetrics.StationProcessed` now takes the full `ProcessingOutcome` instead of a `bool` and emits a
+  distinct label per case:
+
+  | `outcome` | `ProcessingOutcome` | Was |
+  |---|---|---|
+  | `success` | `Processed` | `success` |
+  | `skipped` | `Skipped` | `failure` |
+  | `failure_503` | `FailedHttp503` | `failure` |
+  | `upstream_open` | `FailedUpstreamOpen` | `failure` |
+  | `failure` | `Failed` | `failure` |
+
+  Nothing else changed: the pass still counts only `Processed` as a success, and 503 backoff and
+  open-breaker pass-stopping behave exactly as before. The mapping lives in `WaterMetrics.OutcomeLabel`, and
+  `StationWorkerTests.RunOnce_SkippedStation_IsNotCountedAsAFailure` /
+  `RunOnce_EachFailureKindGetsItsOwnOutcomeLabel` pin it.
+
+  **Action required — Grafana panels and alerts using `outcome="failure"` must be updated.** The
+  `failure` series drops sharply (most of its volume was skips) and three new series appear. Rules written
+  as `outcome!="success"` are now *worse* than before — they match `skipped` and will fire on healthy
+  cycles. Use `outcome=~"failure|failure_503"` for "something is actually broken", and treat `skipped` and
+  `upstream_open` as informational. Because the old and new series share a metric name, panels spanning the
+  upgrade will show a discontinuity rather than a clean cut-over.
+
+---
+
+## [10.1.0] — 2026-08-06
+
+Java→C# parity release: brings over the three Java `service/waterservice` commits made after the 503-backoff
+sync, adds `StationWorker` test coverage, and encrypts the droplet's environment file.
+
+**Deployment note:** this release is the first to require the **master key mount** on the droplet, because
+`waterservice.env` was encrypted as part of it — see `docs/do-update.md` Step 5/8. Minor bump rather than a
+patch because `enc:v1:` support is a new capability.
+
+### Added
+
+- **`enc:v1:` encrypted configuration values** (`Configuration/SecretCodec.cs`). `DB_URL` / `DB_USERNAME` /
+  `DB_PASSWORD` may be stored as AES-256-GCM ciphertext (12-byte nonce, 128-bit tag, base64url) instead of
+  plaintext. Wire-compatible with the Java services and `efj-backend/secret/Protect-Env.ps1`, so one
+  encrypted `.env` serves both. Decryption covers **both** delivery paths: the `DOTENV_PATH` file *and*
+  values already injected as real environment variables (how Docker's `--env-file` delivers them). The
+  variable name is bound in as additional authenticated data, so a ciphertext cannot be relocated between
+  keys. Unmarked values pass through verbatim, so a plaintext or partially-encrypted file stays valid and
+  this image runs against the existing all-plaintext `.env`. A missing or wrong key is a **hard startup
+  failure**, never a silent pass-through. Key material comes from `FF_MASTER_KEY_FILE` (a path, preferred)
+  or `FF_MASTER_KEY`, 32 bytes as hex or base64.
+  *Deploy note:* if the env file is ever encrypted, the container needs the key mount — see
+  `docs/do-update.md` Step 8.
+- **`StationWorkerTests`** — 24 tests covering cycle/pass semantics, HTTP 503 backoff, open-breaker pass
+  stopping, post-processing failure ordering, cycle-overrun accounting, the three startup modes, and the
+  startup log-level policy below. To make this possible without new interfaces or DI indirection,
+  `WaterStationRepository`, `StationPostProcessingService`, `StationProcessorCA`/`US` and `WaterMetrics`
+  are now **unsealed** with the members `StationWorker` calls marked `virtual`. **Do not re-seal them.**
+- **`XmlFetcherUSTests`** and **`SecretCodecTests`** (the latter pins cross-language interop against
+  fixtures generated by `Protect-Env.ps1`).
+
+### Changed
+
+- **Open upstream circuit breaker now stops the country pass.** Polly's `BrokenCircuitException` maps to a
+  new `ProcessingOutcome.FailedUpstreamOpen`, and `StationWorker` abandons that country's pass instead of
+  marching through thousands of stations logging identical failures. The other country's pass is
+  unaffected, and the next cycle retries once the breaker has had time to close. An open breaker does
+  **not** record a per-station HTTP 503 backoff — the station did nothing wrong.
+- **USGS response-body I/O failures now name the station.** A body that dies mid-read (premature EOF,
+  chunked-encoding error) was flattened by `HttpContent` into a bare
+  `HttpRequestException("Error while copying content to a stream.")` — no station, no cause,
+  indistinguishable from every other station in the log. `XmlFetcherUS` now rethrows it with the station
+  and state named, still as an `HttpRequestException` so it is retried exactly as before. `IOException`
+  was also added to the feed pipelines' transient predicate.
+- **HTTP 503 backoff reset demoted to `Debug`.** "Reset station HTTP 503 backoff after successful
+  processing" fired once per successfully processed station — tens of thousands of lines per cycle. The
+  503 *record* is still a warning. **This is the only log level that changed; see the policy below.**
+
+### Log-level policy (added with this release)
+
+**Startup logs that prove a successful start stay at `Information`.** A deployment must be verifiable
+without turning on `Debug`:
+
+| Log | Level |
+|---|---|
+| `Scheduled station cycle. cron="…"` | `Information` |
+| `StartupVerificationStations enabled — processing N station(s)` | `Information` |
+| `Startup verification: station {MLI} processed successfully.` | `Information` |
+| `Startup verification: SUCCESS — N station(s) processed successfully.` | `Information` |
+| `Startup verification: FAILED — no stations were processed successfully.` | `Error` |
+| `RunOnStartup enabled — running an immediate full cycle before scheduling.` | `Information` |
+| `Station pass completed` / `Station cycle completed` / `Station cycle duration` | `Information` |
+| per-station chatter (processed station, 503 backoff reset) | `Debug` |
+
+Pinned by `StationWorkerTests.StartupVerification_ReportsSuccessAtInformation`,
+`StartupVerificationFailure_IsReportedAtError` and `RunOnStartup_AnnouncesItselfAtInformation`, so a future
+log-noise cleanup cannot quietly demote them. **Per-station chatter may be demoted; startup verification
+may not.**
+
+### Also in this release (committed earlier, never released)
+
+- Test framework moved from xUnit to **TUnit**, and native AOT enabled (`48061ea`, 2026-07-24) — committed
+  after the `10.0.5` image was built, so this is its first release.
+
+---
+
+> **Entries below 10.1.0 were reconstructed on 2026-08-06** from git history and the image build dates on
+> the droplet (`docker images ghcr.io/balintomsk/water-station-pusher-cs`) — this file did not exist while
+> they were released, and no `10.0.4` image was ever built. Dates are **image build dates** (when the
+> release actually shipped), which run ahead of the commit dates. Treat the grouping as best-effort.
+
+## [10.0.5] — 2026-07-21
+
+The release running in production until `10.1.0`.
+
+### Added
+
+- **Per-station HTTP 503 backoff** for water stations (`18e64d7`) — a station returning HTTP 503 is backed
+  off rather than retried every cycle.
+
+### Changed
+
+- Startup verification now requires **both** the CA and US workers to process at least one station each
+  (`cc257dd`), so a half-broken deployment can no longer report success.
+
+## [10.0.3] — 2026-07-21
+
+### Changed
+
+- **Log noise: silenced framework/retry telemetry.** Polly logged each *handled* retry at Warning **with a
+  full stack trace** (e.g. a transient USGS connect timeout that then recovered). `Polly` is now overridden
+  to `Error`, which kills the handled-retry noise while leaving genuine unhandled Polly errors visible.
+- Added concise circuit-breaker state-change logging in `ResiliencePipelines` (`OnOpened` / `OnClosed` /
+  `OnHalfOpened`) — one line per state change instead of per attempt.
+- `StationProcessorBase` logs failures as `Type: message` with no stack trace.
+
+Net effect: a retried-then-recovered station produces **0** log lines; a fully failed one produces **1**
+short line.
+
+## [10.0.2] — 2026-07-18
+
+### Changed
+
+- **Log flood fixed.** Default `HttpClient` and Polly logging wrote **212 MB per cycle** — every request
+  and every attempt logged its timing. `System.Net.Http.HttpClient` and `Polly` are now overridden to
+  `Warning`, with a 20 MB per-file cap (`fileSizeLimitBytes` + `rollOnFileSizeLimit`, 7 files retained).
+
+## [10.0.1] — 2026-07-18
+
+### Added
+
+- `Water:Worker:RunOnStartup` (default `false`; env `Water__Worker__RunOnStartup=true`) — runs one full
+  cycle immediately on container start instead of waiting up to an hour for the first cron fire.
+
+### Changed
+
+- **Full scale:** processes **all** stations (~2,219 CA + ~9,501 US), matching the Java service. A full
+  cycle takes ~2–3 h and therefore overruns the hourly cron (see the overrun metric).
+
+## [1.0.0] — 2026-07-17
+
+### Added
+
+- Initial **C# / .NET 10 port** of the Java/Spring Boot `water-station-pusher`
+  (`efj-backend/service/waterservice`). Same stored procedures (`sp_UpdateWaterData`,
+  `sp_push_us_water_data`, `sp_clean_old_water_data`, `spPushSpeciesFromLakeToStation`) and the same
+  `vwWaterStation` query. Stack: Microsoft.Data.SqlClient, Polly, CsvHelper, Cronos, Serilog,
+  prometheus-net. `--console [--station=<MLI>]` runs a single cycle. A JDBC→SqlClient converter lets the
+  shared `.env` `DB_URL` work unchanged.
+- Docker: self-contained `linux-x64` on `debian:trixie-slim`, non-root uid 10001.
+- Documented the **intentional Java + C# dual-service redundancy** — both services run in parallel against
+  the same database by design. **Do not retire either.**
+
+---
+
+## Changelog rules
+
+- **This file is the single place for changelog entries for this service.** Do not start a
+  `## Changelog` section in `CLAUDE.md`, `README.md`, or `docs/specification.md` — link here instead.
+- Add to `## [Unreleased]` as you work; promote it to a version heading when a tag is cut, and bump
+  `<Version>` in `WaterService/WaterService.csproj` in the same change.
+- Group entries under `Added` / `Changed` / `Fixed` / `Removed` / `Security`.
+- Say **why**, not just what — a future reader needs the reason a behaviour changed, especially for log
+  levels, retry/backoff semantics, and anything that alters what a deployment looks like.
+- `docs/specification.md` stays a description of the **current** state; this file carries the **history**.
+  A change usually touches both.
+- Note anything that changes deployment (new mounts, env vars, required secrets) and cross-reference
+  `docs/do-update.md`.

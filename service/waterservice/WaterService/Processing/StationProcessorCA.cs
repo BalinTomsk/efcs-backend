@@ -12,7 +12,7 @@ namespace WaterService.Processing;
 /// <summary>
 /// Coordinates fetch, parse, save, and shared exception handling for one CA station at a time.
 /// </summary>
-public sealed class StationProcessorCA : StationProcessorBase
+public class StationProcessorCA : StationProcessorBase
 {
     private const int MinColumns = 7;
 

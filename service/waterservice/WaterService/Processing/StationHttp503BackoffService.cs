@@ -44,7 +44,9 @@ public sealed class StationHttp503BackoffService
         CancellationToken ct = default)
     {
         await _repository.ResetAsync(provider, country, station.Mli, ct).ConfigureAwait(false);
-        _log.LogInformation(
+        // Debug, not Information: this fires for every successfully processed station, i.e. tens of
+        // thousands of lines per cycle, and the interesting half (the 503 record) is still a warning.
+        _log.LogDebug(
             "Reset station HTTP 503 backoff after successful processing. provider={Provider} country={Country} station={Station} state={State}",
             provider, country, station.Mli, station.State);
     }

@@ -44,8 +44,12 @@ Worker behaviour is in `appsettings.json` under `Water:Worker` (override with en
 
 ```bash
 dotnet build
-dotnet test
+dotnet run --project WaterService.Tests
 ```
+
+The test project uses **TUnit**, which runs as an executable — `dotnet test` does not run it.
+
+Release history and the log-level policy live in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Run locally
 

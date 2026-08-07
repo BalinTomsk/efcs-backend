@@ -23,6 +23,11 @@ service/waterservice/docs/*
 **/.claude/skills/
 
 ############################
+# Claude Code worktrees (each is a separate checkout of this repo — never commit one)
+############################
+**/.claude/worktrees/
+
+############################
 # Application secrets
 ############################
 **/secret/

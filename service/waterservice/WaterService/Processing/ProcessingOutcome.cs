@@ -14,6 +14,9 @@ public enum ProcessingOutcome
     /// <summary>Processing failed because the upstream provider returned HTTP 503.</summary>
     FailedHttp503,
 
+    /// <summary>Processing stopped because the shared upstream circuit breaker is open.</summary>
+    FailedUpstreamOpen,
+
     /// <summary>Processing failed for any other handled reason.</summary>
     Failed,
 }

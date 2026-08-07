@@ -6,7 +6,7 @@ namespace WaterService.Data;
 /// <summary>
 /// Loads station metadata from the <c>vwWaterStation</c> view.
 /// </summary>
-public sealed class WaterStationRepository
+public class WaterStationRepository
 {
     private readonly ISqlConnectionFactory _connectionFactory;
 
@@ -19,7 +19,7 @@ public sealed class WaterStationRepository
     /// Returns all supported stations for the requested country that should be processed by the worker.
     /// </summary>
     /// <param name="country">Country code used to filter stations (<c>CA</c> / <c>US</c>).</param>
-    public async Task<IReadOnlyList<StationRef>> FindSupportedAsync(
+    public virtual async Task<IReadOnlyList<StationRef>> FindSupportedAsync(
         string country, CancellationToken cancellationToken = default)
     {
         var stations = new List<StationRef>();

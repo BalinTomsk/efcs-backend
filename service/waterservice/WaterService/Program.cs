@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Configuration.EnvironmentVariables;
 using Microsoft.Extensions.Configuration.Memory;
 using Prometheus;
 using Serilog;
@@ -10,9 +11,15 @@ using WaterService.Web;
 
 // Load a local .env file as the LOWEST-precedence configuration source, so real environment variables
 // and appsettings always win (production injects DB_URL/DB_USERNAME/DB_PASSWORD as env vars).
+// enc:v1: values in the file are decrypted here (see SecretCodec).
 List<KeyValuePair<string, string?>> dotenv = DotEnvLoader.Load()
     .Select(kv => new KeyValuePair<string, string?>(kv.Key, kv.Value))
     .ToList();
+
+// Credentials do not always arrive through the .env file: a container run with Docker's --env-file has
+// them injected as real environment variables the loader above never sees. Decrypt those separately.
+// Empty (and therefore a complete no-op) for the existing all-plaintext deployments.
+List<KeyValuePair<string, string?>> decryptedEnv = SecretCodec.DecryptEnvironmentVariables().ToList();
 
 Log.Logger = new LoggerConfiguration()
     .WriteTo.Console(new CompactJsonFormatter())
@@ -26,8 +33,8 @@ string? stationFilter = args
 try
 {
     return consoleMode
-        ? await RunConsoleAsync(args, dotenv, stationFilter)
-        : await RunWebAsync(args, dotenv);
+        ? await RunConsoleAsync(args, dotenv, decryptedEnv, stationFilter)
+        : await RunWebAsync(args, dotenv, decryptedEnv);
 }
 catch (Exception ex)
 {
@@ -42,10 +49,12 @@ finally
 // ---------------------------------------------------------------------------------------------------
 
 // Normal mode: schedule the hourly cycle and expose /health (8080) + management endpoints (8081).
-static async Task<int> RunWebAsync(string[] args, List<KeyValuePair<string, string?>> dotenv)
+static async Task<int> RunWebAsync(
+    string[] args, List<KeyValuePair<string, string?>> dotenv, List<KeyValuePair<string, string?>> decryptedEnv)
 {
     WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
     builder.Configuration.Sources.Insert(0, new MemoryConfigurationSource { InitialData = dotenv });
+    AddDecryptedEnvironment(builder.Configuration, decryptedEnv);
     builder.Services.AddSerilog(ConfigureSerilog);
 
     // Public probe surface on 8080; actuator-equivalent (metrics/liveness/readiness) on private 8081.
@@ -79,10 +88,15 @@ static async Task<int> RunWebAsync(string[] args, List<KeyValuePair<string, stri
 
 // Console mode (--console [--station=<MLI>]): run exactly one cycle, then exit. Identical behaviour to a
 // scheduled cycle (both countries in parallel + a single post-processing run).
-static async Task<int> RunConsoleAsync(string[] args, List<KeyValuePair<string, string?>> dotenv, string? station)
+static async Task<int> RunConsoleAsync(
+    string[] args,
+    List<KeyValuePair<string, string?>> dotenv,
+    List<KeyValuePair<string, string?>> decryptedEnv,
+    string? station)
 {
     HostApplicationBuilder builder = Host.CreateApplicationBuilder(args);
     builder.Configuration.Sources.Insert(0, new MemoryConfigurationSource { InitialData = dotenv });
+    AddDecryptedEnvironment(builder.Configuration, decryptedEnv);
     builder.Services.AddSerilog(ConfigureSerilog);
     builder.Services.AddWaterServices(builder.Configuration);
 
@@ -93,6 +107,34 @@ static async Task<int> RunConsoleAsync(string[] args, List<KeyValuePair<string, 
     int processed = await worker.RunCycleAsync(station, CancellationToken.None);
     Log.Information("Console debug mode finished. processedStations={Processed}", processed);
     return 0;
+}
+
+// Overlays the plaintext of any enc:v1: environment variables directly ABOVE the environment-variable
+// source, so they replace their own encrypted originals while command-line arguments still win. Adding
+// nothing when nothing is encrypted keeps this a no-op for all-plaintext deployments.
+static void AddDecryptedEnvironment(IConfigurationBuilder configuration, List<KeyValuePair<string, string?>> decrypted)
+{
+    if (decrypted.Count == 0)
+    {
+        return;
+    }
+
+    var source = new MemoryConfigurationSource { InitialData = decrypted };
+
+    // The host builders add a DOTNET_/ASPNETCORE_-prefixed environment source for host configuration as
+    // well; the unprefixed one is the one carrying DB_URL and friends.
+    int envIndex = -1;
+    for (int i = 0; i < configuration.Sources.Count; i++)
+    {
+        if (configuration.Sources[i] is EnvironmentVariablesConfigurationSource { Prefix: null or "" })
+        {
+            envIndex = i;
+        }
+    }
+
+    // No unprefixed environment source (never the case for the real host builders) — fall back to
+    // highest precedence rather than silently leaving the ciphertext in place.
+    configuration.Sources.Insert(envIndex < 0 ? configuration.Sources.Count : envIndex + 1, source);
 }
 
 // Structured JSON logging with a 7-day rolling file (logback + logstash-encoder equivalent). Every entry

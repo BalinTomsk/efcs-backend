@@ -8,6 +8,9 @@ namespace WaterService.Configuration;
 /// that inject <c>DB_URL</c>/<c>DB_USERNAME</c>/<c>DB_PASSWORD</c> as environment variables are
 /// unaffected — the <c>.env</c> file is only a local development fallback. Only keys declared in the
 /// file are imported; the whole OS environment is never copied.</para>
+///
+/// <para>Values carrying the <c>enc:v1:</c> marker are decrypted via <see cref="SecretCodec"/>; anything
+/// else is used verbatim, so a plaintext or partially-encrypted file stays valid.</para>
 /// </summary>
 public static class DotEnvLoader
 {
@@ -15,8 +18,13 @@ public static class DotEnvLoader
     private const string DefaultDotenvFile = ".env";
 
     /// <summary>
-    /// Reads the resolved <c>.env</c> file and returns its declared, non-blank entries.
-    /// Never throws for a missing or malformed file.
+    /// Reads the resolved <c>.env</c> file and returns its declared, non-blank entries, with any
+    /// <c>enc:v1:</c> values decrypted.
+    ///
+    /// <para>Never throws for a missing or malformed file. It <em>does</em> throw when a value is
+    /// encrypted but undecryptable — that is a deliberate hard startup failure (see
+    /// <see cref="SecretCodec"/>), because passing the raw marker through to the SQL driver would
+    /// surface as a confusing login error far from the real cause.</para>
     /// </summary>
     public static IReadOnlyDictionary<string, string> Load()
     {
@@ -66,7 +74,7 @@ public static class DotEnvLoader
 
             if (key.Length > 0 && value.Length > 0)
             {
-                values[key] = value;
+                values[key] = SecretCodec.DecryptIfNeeded(key, value)!;
             }
         }
 

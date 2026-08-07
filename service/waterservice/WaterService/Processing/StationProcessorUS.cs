@@ -12,7 +12,7 @@ namespace WaterService.Processing;
 /// <summary>
 /// Coordinates fetch, parse, save, and shared exception handling for one US station at a time.
 /// </summary>
-public sealed class StationProcessorUS : StationProcessorBase
+public class StationProcessorUS : StationProcessorBase
 {
     private readonly XmlFetcherUS _fetcher;
     private readonly WaterDataRepository _dataRepo;

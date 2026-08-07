@@ -56,9 +56,40 @@ public sealed class XmlFetcherUS
             }
 
             response.EnsureSuccessStatusCode();
-            string body = await response.Content.ReadAsStringAsync(token).ConfigureAwait(false);
+
+            string body;
+            try
+            {
+                body = await response.Content.ReadAsStringAsync(token).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (FindCause<IOException>(ex) is not null)
+            {
+                // USGS regularly truncates a response mid-body ("The response ended prematurely",
+                // chunked-encoding errors). Because the headers arrived cleanly this surfaces from the
+                // CONTENT read, where HttpContent flattens it into a bare
+                // HttpRequestException("Error while copying content to a stream.") — no station, no
+                // cause, indistinguishable from any other station in the log. Rethrown with the station
+                // named, still an HttpRequestException so the pipeline retries it as before.
+                throw new HttpRequestException(
+                    $"I/O error while reading USGS WaterML response for station {mli} (state {state})", ex);
+            }
+
             _log.LogDebug("Fetched USGS WaterML. station={Mli} state={State}", mli, state);
             return body;
         }, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Walks the exception chain for the first cause of the given type, or <c>null</c>.</summary>
+    private static T? FindCause<T>(Exception? ex) where T : Exception
+    {
+        for (Exception? current = ex; current is not null; current = current.InnerException)
+        {
+            if (current is T match)
+            {
+                return match;
+            }
+        }
+
+        return null;
     }
 }

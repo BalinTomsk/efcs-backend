@@ -19,6 +19,25 @@ feed fetch fails on one side, the other still lands the data. The post-processin
 (`dbo.sp_clean_old_water_data`, `dbo.spPushSpeciesFromLakeToStation`) therefore run once per service per
 cycle; that duplication is expected and tolerated.
 
+## Changelog — use `CHANGELOG.md`
+
+**`CHANGELOG.md` (service root) is the single place for changelog entries.** Every notable change goes
+there under `## [Unreleased]`, grouped `Added` / `Changed` / `Fixed` / `Removed` / `Security`, with the
+**reason** for the change — not just what changed. Do **not** start a `## Changelog` section in this file,
+`README.md`, or `docs/specification.md`; link to `CHANGELOG.md` instead. `docs/specification.md` describes
+the **current** state, `CHANGELOG.md` carries the **history**. When a version is tagged, promote
+`[Unreleased]` to a version heading and bump `<Version>` in `WaterService/WaterService.csproj` in the same
+change. `CHANGELOG.md` also carries the **log-level policy** (below) — read it before touching log levels.
+
+## Log levels — startup verification stays INFO
+
+Per-station chatter may be demoted to `Debug` to control volume, **but the logs that prove a successful
+start must stay at `Information`** so a deployment can be verified without enabling `Debug`: the
+`Scheduled station cycle` line, all `Startup verification: …` progress/SUCCESS lines (FAILED is `Error`),
+`RunOnStartup enabled …`, and the pass/cycle completion summaries. This is pinned by
+`StationWorkerTests.StartupVerification_ReportsSuccessAtInformation` and its two siblings — if one of those
+fails, a log-noise cleanup went too far. Full table in `CHANGELOG.md`.
+
 ## Keeping docs in sync — IMPORTANT
 
 `docs/specification.md` is the **single source of truth** used to recreate this service from scratch.
@@ -30,6 +49,7 @@ It must always reflect the current state of the code.
   `Dockerfile`, etc.) is created, modified, or deleted — update `docs/specification.md` to match.
 - Whenever **this `claude.md`** is updated — apply the same change to `docs/specification.md`
   if it affects behaviour, structure, or configuration.
+- Whenever behaviour changes, also add an entry to `CHANGELOG.md` under `## [Unreleased]`.
 - `docs/specification.md` must be sufficient on its own for a developer (or Claude) to
   **fully recreate the service from scratch** with no other context. Keep it complete and accurate.
 - Do not leave `docs/specification.md` describing behaviour that no longer exists, or omitting
@@ -104,7 +124,7 @@ to verify the fix; run `mssql\UNIT_TESTS\autorun.bat`). That file lives in the s
 ## Orientation
 
 - **Source of truth:** `docs/specification.md` (full spec — keep it in sync with the code). `README.md` for
-  build/run. Deployment runbook: `docs/do-update.md`.
+  build/run. Deployment runbook: `docs/do-update.md`. Release history: `CHANGELOG.md`.
 - **Stack:** Microsoft.Data.SqlClient (no ORM), Polly (retry + circuit breaker), CsvHelper, Cronos, Serilog
   (JSON, 7-day rolling file), prometheus-net. Host: Generic Host + minimal ASP.NET Core.
 - **Layout:** `Program.cs` (web mode + `--console` one-shot); `Processing/StationWorker.cs` (cron scheduler,
@@ -119,8 +139,14 @@ to verify the fix; run `mssql\UNIT_TESTS\autorun.bat`). That file lives in the s
 
 ```bash
 dotnet build
-dotnet test        # 13 xUnit tests
+dotnet run --project WaterService.Tests        # 57 TUnit tests
 ```
+
+**Test seams:** `WaterStationRepository`, `StationPostProcessingService`, `StationProcessorCA`/`US` and
+`WaterMetrics` are **not `sealed`**, and the members `StationWorker` calls on them are `virtual`, so
+`StationWorkerTests` can subclass them with `null!` internals instead of hitting a socket or a DB. That is
+the whole reason those types are open — keep them that way, and prefer overriding to adding new interfaces
+or DI indirection.
 
 Docker: multi-stage build publishing a **self-contained linux-x64** app onto `debian:trixie-slim`
 (GA .NET 10 has no Debian-trixie base image), non-root uid 10001. **Do not set `InvariantGlobalization`** —
@@ -139,3 +165,16 @@ DB credentials come from `DB_URL` / `DB_USERNAME` / `DB_PASSWORD` (real environm
 connection string) for parity with the other backend services. **Never commit real credentials** — committed
 files and `docs/*` use placeholders only. On the droplet the secret is a volume-mounted file read via
 `DOTENV_PATH`.
+
+Any of those values may be stored as **`enc:v1:` AES-256-GCM ciphertext** instead of plaintext
+(`Configuration/SecretCodec.cs`). Values without the marker are used verbatim, so a plaintext or
+partially-encrypted file stays valid and this image runs against the existing all-plaintext `.env`.
+The format is **wire-compatible with the Java services and `efj-backend/secret/Protect-Env.ps1`**, which
+generates the deployable file — one encrypted `.env` serves both services, and `SecretCodecTests` pins
+the interop against fixtures produced by that script. Decryption covers both delivery paths: values read
+from the `DOTENV_PATH` file *and* encrypted values already injected as real environment variables (how
+Docker's `--env-file` delivers them). The variable name is bound in as additional authenticated data, so
+a ciphertext cannot be relocated from one key to another. A missing or wrong key is a **hard startup
+failure**, never a silent pass-through — handing a raw `enc:v1:` string to SqlClient would surface as a
+baffling login error. Key material comes from `FF_MASTER_KEY_FILE` (a path — preferred, keeps it out of
+`docker inspect`) or `FF_MASTER_KEY`, as 32 bytes in hex or base64.
