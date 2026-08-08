@@ -1,0 +1,119 @@
+# Changelog
+
+All notable changes for this service must be recorded in this file.
+
+## [10.0.2] - 2026-08-08
+
+**Fix: the daily API allowance was booked up front, so any restart forfeited the rest of the day.**
+
+`WeatherApiUsageTracker` charged the whole `<PROVIDER>_DAILY_LIMIT` at cycle start, before a single
+station was fetched. Observed on 2026-08-08: the first cycle booked 900/900/1400 at 16:04:49, did
+~154 stations of real work, and three restarts later the service had ~3,050 station-slots spent on
+nothing and sat idle until the next UTC day.
+
+- Budget is now charged **one station at a time, immediately before that station is fetched**
+  (`TryConsumeAsync`). An interrupted cycle costs exactly what it used — and that stays true after a
+  hard kill, where nothing gets a chance to credit anything back. Crediting the remainder on graceful
+  shutdown would have patched the deploy case only.
+- `SnapshotAsync` replaces the up-front reservation for sizing the cycle and for the budget log line,
+  which now reads `usedToday=… remainingToday=…`.
+- The ledger keeps **one aggregated row per (date, provider)**, incremented in place, so the file
+  stays a few lines long however many stations a day runs. The old append-per-reservation format
+  still reads correctly (entries are summed).
+- Running out of allowance mid-pass is treated as a normal end of the day's work, not a fault:
+  post-processing still runs for the stations that did complete.
+
+Inherited from the Java service, which books the same way and has the same exposure.
+106 C# tests, all passing.
+
+**Deployed to prod 2026-08-08.** Today's ledger was cleared on deploy, since the recorded usage was
+the old up-front artefact rather than real work. Verified live: budget starts `usedToday=0
+remaining=900/1400/900 persisted=True`, the ledger increments one per station, and — with 10.0.1's
+resolver — real gauges now resolve and fetch: `13213100 → KONO`, `04252500 → KRME`, zero Weather.gov
+skips where previously every US station skipped.
+
+## [10.0.1] - 2026-08-08
+
+**Fix: every US station was being skipped, and no Canadian station resolved.**
+
+Measured before the fix: Weather.gov 0/25 sampled stations returned data, Weather Canada 0/25.
+Only Open-Meteo was landing anything. Invisible in monitoring because a fully-skipped cycle is
+"healthy" by design — zero failures, post-processing runs, health green.
+
+- **Weather.gov was asked by the wrong identifier.** `dbo.vwWeatherForecastToDay` is built from
+  `dbo.WaterStation`, so `mli` is a WATER gauge id — all 2,219 US rows are numeric USGS site
+  numbers, none is an NWS call sign. `/stations/{mli}/observations/latest` therefore 404s for
+  every US station, permanently. The service now resolves the gauge's COORDINATE to a nearby NWS
+  station via `/points/{lat},{lon}/stations` and fetches that station's observation. Measured
+  25/25 resolve and 25/25 return data. Two API details this depends on: coordinates must be
+  rounded to 4 decimal places, and `/points` answers with a 301 that must be followed.
+- **The resolution is cached in the database** — new `dbo.weather_gov_station` +
+  `dbo.fn_weather_gov_station` + `dbo.sp_save_weather_gov_station`, covered by
+  `unit_test@WeatherGovStation.sql` (4 tests, confirmed FAILing before the objects existed, then
+  PASSing; full suite clean). The mapping is geographic and permanent, so resolving inline every
+  cycle would double the request count against a rate-limited public API. A "no station nearby"
+  answer is cached as a NULL `station_id`, so a point that will never resolve is asked once.
+- **Weather Canada bbox radius 0.05° → 0.5°.** 0.05° (~5.5 km) matched no SWOB site for any
+  sampled station; 0.25° recovered 12/25 and 0.5° recovered 21/25. SWOB is a real observation
+  network with real gaps, so it cannot cover every inland point — only the gridded providers can.
+
+Inherited from the Java service, which has the same identifiers and bbox default and has been
+skipping the same stations. 102 C# tests, all passing.
+
+**Deployed to prod 2026-08-08.** DB objects applied first (one transaction), then image
+`10.0.1`. Verified live: health 10.0.1, readiness Healthy, all three workers' smoke checks pass,
+and the first resolution round-tripped through the new proc into `dbo.weather_gov_station`.
+
+## [10.0.0] - 2026-08-08
+
+Initial C#/.NET 10 port of the Java `weather-station-pusher`
+(`efj-backend/service/weather`, Spring Boot 3.5.16 / Java 21).
+
+**Deployed to prod 2026-08-08** — `debian-csnode` (137.184.218.128), image
+`ghcr.io/balintomsk/weather-station-pusher-cs:10.0.0`, port 8081, state on `volume-env` at
+`/mnt/volume_env/weatherservice`. Version numbering follows the C# port line (10.x) to keep it
+distinct from the Java service's 1.x, matching `water-station-pusher-cs`. First-time droplet setup
+is documented in `docs/install.md`.
+
+Verified live: `/actuator/health` reports 10.0.0, readiness `Healthy` (which also proves the
+`enc:v1:` DB credentials decrypted), three workers started and passed their smoke checks
+(Weather.gov, Open-Meteo, Weather Canada), the two metered workers correctly skipped on
+`*_ENABLE=false`, budget ledger `persisted=True`, no phantom crash incident, zero errors.
+
+**The Java weather service was left running on `debian-jnode`** — both now write `dbo.ows_meteo`.
+See `docs/do-update.md` → Coexistence; this is not the water services' redundancy arrangement.
+
+Ported in full:
+
+- Five provider workers (Weather.gov US, Open-Meteo CA, Visual Crossing US, Google Weather US,
+  Weather Canada CA), each with its own startup verification, daily cycle, and eight-hour pacing budget.
+- Per-provider daily API budgets, reserved up front and persisted so a restart cannot re-spend them.
+- Raw payload persistence into `dbo.ows_meteo` (`type = 2`), verbatim, with a response size cap and a
+  JSON-object shape guard.
+- Health-gated post-processing: `spPushSpeciesFromLakeToStation` → `spTotalUpdateProbability` →
+  `sp_clean_old_weather_data`, skipped when the cycle's failure rate exceeds the threshold.
+- Resilience per provider: retry with exponential backoff and jitter, circuit breaker, rate limiter,
+  and inline `Retry-After` handling for HTTP 429.
+- Crash/unclean-restart tracking and the Friday weekly report email (cycle summaries + incidents).
+- `.env` loading, `enc:v1:` secret decryption, and JDBC-URL translation shared with the other services.
+- Health endpoints on port 8081 at the original Actuator paths.
+- `--console [--station=<MLI>]` one-shot mode.
+
+Deviations from the Java implementation are enumerated in `CLAUDE.md` → "Deliberate deviations". The two
+behavioural ones:
+
+- A failed cycle waits a minute before retrying; the Java loop spins at thousands of iterations a second
+  while the database is unreachable.
+- Each worker is gated by two independent switches, neither of which exists in the Java service:
+  a per-provider `<PROVIDER>_ENABLE` toggle (default `true`, so a provider is opted *out* explicitly),
+  and — for the metered providers — a non-blank `VISUAL_CROSSING_API_KEY` / `GOOGLE_WEATHER_API_KEY`.
+  A gated-off worker is not started at all rather than started and left failing every station, which
+  would push the cycle's failure rate past the threshold and suppress post-processing for a country
+  whose other providers were healthy. Both API keys are currently blank in
+  `efcs-backend/secret/plaintext.env`, so a deploy today runs three workers: Weather.gov (US),
+  Open-Meteo (CA), Weather Canada (CA).
+- Pacing is per provider: `<PROVIDER>_TIMEOUT` seconds between calls, or — when `0`/absent — that
+  provider's `<PROVIDER>_DAILY_LIMIT` spread over 12 hours. Java instead divided a fixed 8-hour budget
+  by however many stations happened to be loaded, so the request rate moved with the station count.
+
+95 tests (TUnit), all passing.
