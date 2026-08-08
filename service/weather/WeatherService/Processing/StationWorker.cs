@@ -64,6 +64,7 @@ public class StationWorker : BackgroundService
     private readonly StationPostProcessingService _postProcessingService;
     private readonly CycleReportRecorder _cycleReportRecorder;
     private readonly WeatherApiUsageTracker _usageTracker;
+    private readonly WeatherStationCoverageRepository _coverageRepository;
     private readonly WorkerOptions _options;
     private readonly ILogger<StationWorker> _log;
 
@@ -77,6 +78,7 @@ public class StationWorker : BackgroundService
         StationPostProcessingService postProcessingService,
         CycleReportRecorder cycleReportRecorder,
         WeatherApiUsageTracker usageTracker,
+        WeatherStationCoverageRepository coverageRepository,
         IOptions<WorkerOptions> options,
         ILogger<StationWorker> log)
     {
@@ -89,6 +91,7 @@ public class StationWorker : BackgroundService
         _postProcessingService = postProcessingService;
         _cycleReportRecorder = cycleReportRecorder;
         _usageTracker = usageTracker;
+        _coverageRepository = coverageRepository;
         _options = options.Value;
         _log = log;
     }
@@ -280,6 +283,8 @@ public class StationWorker : BackgroundService
                     break;
             }
 
+            await RecordCoverageAsync(worker, station, outcome, ct).ConfigureAwait(false);
+
             long remainingDelayMs = targetDelayMs - (CurrentTimeMillis() - startedAt);
             var progress = new CountryPassSummary(
                 worker.ReportName, country, processed, skipped, failed, lastProcessedStation, lastFailedStation);
@@ -310,6 +315,38 @@ public class StationWorker : BackgroundService
 
         await MaybeRunPostProcessingAsync(summary, ct).ConfigureAwait(false);
         return summary;
+    }
+
+    /// <summary>
+    /// Flags whether this provider could serve this gauge, so <c>fn_weather_uncovered_stations</c> can
+    /// hand the gaps to a fallback worker.
+    ///
+    /// <para>Only PROCESSED and SKIPPED are coverage facts. A failure is transient — a timeout or a 503
+    /// says nothing about whether the provider covers the point, and recording it would send a
+    /// perfectly-served gauge to the fallback worker on the strength of one bad night.</para>
+    ///
+    /// <para>Never allowed to fail the station: the flag is an optimisation, and the payload for this
+    /// cycle is already saved by the time we get here.</para>
+    /// </summary>
+    private async Task RecordCoverageAsync(
+        WorkerDefinition worker, StationRef station, ProcessingOutcome outcome, CancellationToken ct)
+    {
+        if (outcome is not (ProcessingOutcome.Processed or ProcessingOutcome.Skipped))
+        {
+            return;
+        }
+
+        try
+        {
+            await _coverageRepository
+                .SaveAsync(station.Mli, worker.Provider, outcome == ProcessingOutcome.Processed, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _log.LogWarning(ex, "Could not record provider coverage. provider={Provider} station={Mli}",
+                worker.ReportName, station.Mli);
+        }
     }
 
     private async Task RunStartupVerificationThenLoopAsync(WorkerDefinition worker, CancellationToken ct)
