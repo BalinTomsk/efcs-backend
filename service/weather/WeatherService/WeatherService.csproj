@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>WeatherService</RootNamespace>
+    <AssemblyName>WeatherService</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- NOTE: do NOT enable InvariantGlobalization — Microsoft.Data.SqlClient throws
+         "Globalization Invariant Mode is not supported" at connection open. The runtime image
+         installs ICU (libicu) instead. -->
+    <!-- Version drives the /actuator/health "version" field; keep in step with the release tag. -->
+    <Version>10.0.2</Version>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="WeatherService.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\docs\**\*" Link="docs\%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- SQL Server driver (cross-platform, runs on Debian in the container). -->
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="6.0.2" />
+    <!-- Cron parsing for the weekly report trigger (6-field with seconds, like Spring cron). -->
+    <PackageReference Include="Cronos" Version="0.11.1" />
+    <!-- Resilience: retry + circuit breaker (Resilience4j equivalent). -->
+    <PackageReference Include="Polly.Core" Version="8.5.2" />
+    <PackageReference Include="Polly.Extensions" Version="8.5.2" />
+    <!-- NOTE: per-provider request pacing uses System.Threading.RateLimiting, which ships in the
+         net10.0 shared framework — no PackageReference needed (adding one warns NU1510). -->
+    <!-- SMTP for the weekly report email (spring-boot-starter-mail equivalent).
+         Keep at >= 4.17.0: 4.8.0 carries GHSA-9j88-vvj5-vhgr / GHSA-g7hc-96xr-gvvx. -->
+    <PackageReference Include="MailKit" Version="4.17.0" />
+    <!-- Structured JSON logging with a 7-day rolling file (logback + logstash-encoder equivalent). -->
+    <PackageReference Include="Serilog.AspNetCore" Version="9.0.0" />
+    <PackageReference Include="Serilog.Formatting.Compact" Version="3.0.0" />
+  </ItemGroup>
+
+</Project>
