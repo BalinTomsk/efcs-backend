@@ -2,6 +2,33 @@
 
 All notable changes for this service must be recorded in this file.
 
+## [10.0.3] - 2026-08-08
+
+**Flag the gauges a provider cannot serve, so a different worker can pick them up.**
+
+Weather Canada's SWOB is an observation network with genuine geographic gaps — even at a 0.5°
+(~55 km) search box, roughly one Canadian gauge in six has no nearby site. Only gridded providers
+(Open-Meteo, Visual Crossing, Google) can answer an arbitrary coordinate. Those gauges previously
+skipped silently on every cycle forever, and since a fully-skipped cycle still reports healthy,
+nothing ever surfaced them.
+
+DB (envfish-db): `dbo.weather_station_coverage` — one row per (gauge, provider), plus
+`dbo.fn_weather_station_coverage`, `dbo.fn_weather_uncovered_stations` and
+`dbo.sp_save_weather_station_coverage`. `fn_weather_uncovered_stations(@provider)` returns the
+gaps **with coordinate, state and country**, which is everything a fallback worker needs to fetch
+them elsewhere. Covered by `unit_test@WeatherCoverage.sql` (5 tests, confirmed FAILing first).
+
+Service: `StationWorker` records the flag as each station completes. **Only PROCESSED and SKIPPED
+are coverage facts** — a failure is transient, and treating a timeout or a 503 as "not covered"
+would route a perfectly-served gauge to the fallback worker on the strength of one bad night. The
+write can never fail a station: the payload is already saved by then.
+
+The flag is a current fact, not a log — one row per (gauge, provider), updated in place, so a gap
+that later resolves (a new SWOB site, a widened box) simply clears.
+
+107 tests, all passing. **Deployed to prod 2026-08-08**, DB objects first; coverage rows confirmed
+being written for all three running providers.
+
 ## [10.0.2] - 2026-08-08
 
 **Fix: the daily API allowance was booked up front, so any restart forfeited the rest of the day.**

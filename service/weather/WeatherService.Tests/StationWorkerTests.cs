@@ -178,6 +178,31 @@ public class StationWorkerTests
     }
 
     [Test]
+    public async Task CoverageIsFlaggedPerStation_ForTheFallbackWorker()
+    {
+        // A skip is a coverage fact ("this provider has nothing for this point"); a failure is not,
+        // so a bad night must never route a well-served gauge to the fallback worker.
+        var harness = new Harness
+        {
+            Stations = ThreeStations,
+            Outcome = station => station.Mli switch
+            {
+                "MLI-1" => ProcessingOutcome.Processed,
+                "MLI-2" => ProcessingOutcome.Skipped,
+                _ => ProcessingOutcome.Failed,
+            },
+        };
+
+        await harness.Worker.RunOnceAsync(null);
+
+        await Assert.That(harness.Coverage).IsEquivalentTo(new[]
+        {
+            ("MLI-1", "weather-gov", true),
+            ("MLI-2", "weather-gov", false),
+        });
+    }
+
+    [Test]
     public async Task BudgetIsChargedPerStation_NotBookedUpFront()
     {
         // The defect this replaced booked the whole daily limit at cycle start, so a restart forfeited
@@ -355,6 +380,8 @@ public class StationWorkerTests
 
         public int Consumed { get; set; }
 
+        public List<(string Mli, string Provider, bool Covered)> Coverage { get; } = [];
+
         /// <summary>Fixed 5s pacing so sleep assertions do not depend on the derived-gap arithmetic.</summary>
         public WorkerOptions Options { get; } = BuildOptions();
 
@@ -391,6 +418,7 @@ public class StationWorkerTests
                 postProcessing,
                 new CycleReportRecorder(),
                 new FakeUsageTracker(harness),
+                new FakeCoverageRepository(harness),
                 Options.Create(harness.Options),
                 NullLogger<StationWorker>.Instance)
         {
@@ -462,6 +490,16 @@ public class StationWorkerTests
             return harness.PostProcessingError is null
                 ? Task.CompletedTask
                 : Task.FromException(harness.PostProcessingError);
+        }
+    }
+
+    private sealed class FakeCoverageRepository(Harness harness)
+        : WeatherStationCoverageRepository(null!, EmptyPipelines())
+    {
+        public override Task SaveAsync(string mli, string provider, bool covered, CancellationToken ct = default)
+        {
+            harness.Coverage.Add((mli, provider, covered));
+            return Task.CompletedTask;
         }
     }
 

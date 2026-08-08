@@ -52,6 +52,7 @@ public static class ServiceRegistration
         services.AddSingleton<WeatherStationRepository>();
         services.AddSingleton<WeatherDataRepository>();
         services.AddSingleton<WeatherGovStationRepository>();
+        services.AddSingleton<WeatherStationCoverageRepository>();
 
         services.AddSingleton<OpenMeteoFetcher>();
         services.AddSingleton<WeatherGovFetcher>();
