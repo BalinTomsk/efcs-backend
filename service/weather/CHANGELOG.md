@@ -2,6 +2,26 @@
 
 All notable changes for this service must be recorded in this file.
 
+## [10.1.0] - 2026-08-11
+
+**Add Wunderground as a 6th weather-data provider (450 stations/day), C# port of the equivalent
+Java change.**
+
+A PWS Contributor key has no lat/lon forecast endpoint, so each station costs two calls:
+`v3/location/near` resolves the nearest personal weather station to the water station's
+coordinates, then `v2/pws/observations/current` fetches its latest reading — both run through the
+same resilience pipeline/rate limiter as independent requests, so effective call volume against
+the Wunderground quota is roughly double the configured daily station limit.
+
+New `WundergroundFetcher` + `StationProcessorWunderground`, a `wunderground` `WorkerDefinition`
+(US), and config (`WundergroundApiKey`, `Enable.Wunderground`, `Timeout.Wunderground`,
+`DailyLimit.Wunderground` = 450), mirroring the existing Google Weather pattern exactly. 113 tests
+(1 pre-existing unrelated failure, see repo history).
+
+**Deployed to prod 2026-08-11** alongside the Java service's identical change — both run at the
+full 450/day against the same Wunderground account by deliberate choice (unlike Visual
+Crossing/Google Weather, which stay Java-only to avoid double-spending a shared metered quota).
+
 ## [10.0.3] - 2026-08-08
 
 **Flag the gauges a provider cannot serve, so a different worker can pick them up.**
