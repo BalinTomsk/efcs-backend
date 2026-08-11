@@ -59,6 +59,11 @@ public class StationWorker : BackgroundService
     private static readonly WorkerDefinition[] Workers =
         [WeatherGovUs, OpenMeteoCa, VisualCrossingUs, GoogleWeatherUs, WeatherCanadaCa, WundergroundUs];
 
+    /// <summary>Total providers, whether or not each is actually enabled today. Drives
+    /// <see cref="Reporting.CycleReportRecorder"/>'s capacity so it always covers a full week no matter
+    /// how many providers exist, without needing to be hand-updated every time one is added or removed.</summary>
+    internal static readonly int WorkerCount = Workers.Length;
+
     private readonly WeatherStationRepository _stationRepository;
     private readonly StationProcessorOpen _stationProcessorOpen;
     private readonly StationProcessorWeatherGov _stationProcessorWeatherGov;
