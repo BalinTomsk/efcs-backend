@@ -39,6 +39,16 @@ public class CycleReportRecorderTests
         await Assert.That(entries[^1].SuccessfulStations).IsEqualTo(CycleReportRecorder.MaxEntries + 2);
     }
 
+    [Test]
+    public async Task CapacityCoversAFullWeekForEveryProvider()
+    {
+        // MaxEntries is derived from the actual worker count so it always covers a full week no matter
+        // how many providers exist -- the bug this replaced hardcoded the multiplier at 2 and silently
+        // fell behind as providers were added (grew to 6 without the constant ever moving).
+        await Assert.That(CycleReportRecorder.MaxEntries)
+            .IsEqualTo(CycleReportRecorder.MaxEntriesPerWorker * WeatherService.Processing.StationWorker.WorkerCount);
+    }
+
     private static CycleReportEntry Entry(int successfulStations) => new(
         DateOnly.FromDateTime(DateTime.Now), "Weather.gov", "US", successfulStations, 0,
         "MLI-" + successfulStations, null);

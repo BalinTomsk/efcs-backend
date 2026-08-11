@@ -2,6 +2,24 @@
 
 All notable changes for this service must be recorded in this file.
 
+## [10.1.1] - 2026-08-11
+
+**Fix: the weekly report's cycle-history buffer had gone stale relative to the real worker count.**
+
+`CycleReportRecorder`'s capacity was `MaxEntriesPerWorker(7) * ExpectedWorkerCount`, but
+`ExpectedWorkerCount` was a hardcoded `2` — set when the service ran two workers and never updated
+as providers were added. With today's 4 active workers (Weather.gov, Open-Meteo, Weather Canada,
+Wunderground) the 14-entry cap held only ~3.5 days, not the intended week; the Friday email would
+silently be missing Monday–Wednesday's cycles despite being titled "Weekly Report."
+
+`MaxEntries` is now derived from `StationWorker.WorkerCount` (the actual `Workers` array length)
+instead of a hand-maintained constant, so it can't drift out of sync again as providers are added
+or removed. Pure sizing fix — the report's own text was already honest about how many entries it
+was showing, so no user-facing wording changed.
+
+114 tests, all passing (the 1 pre-existing unrelated `CaProviders_DailyLimitCoversEveryCanadianStation`
+gap is untouched by this change). **Deployed to prod 2026-08-11.**
+
 ## [10.1.0] - 2026-08-11
 
 **Add Wunderground as a 6th weather-data provider (450 stations/day), C# port of the equivalent

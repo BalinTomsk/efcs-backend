@@ -12,8 +12,11 @@ namespace WeatherService.Reporting;
 public class CycleReportRecorder
 {
     internal const int MaxEntriesPerWorker = 7;
-    internal const int ExpectedWorkerCount = 2;
-    internal const int MaxEntries = MaxEntriesPerWorker * ExpectedWorkerCount;
+    /// <summary>Derived from <see cref="Processing.StationWorker.WorkerCount"/> rather than a
+    /// hand-maintained constant, which previously went stale as providers were added (fixed at 2 while
+    /// the worker count grew to 6) and silently shrank the report's effective window well below a
+    /// week.</summary>
+    internal static readonly int MaxEntries = MaxEntriesPerWorker * Processing.StationWorker.WorkerCount;
 
     private readonly Queue<CycleReportEntry> _entries = new();
     private readonly Lock _gate = new();
