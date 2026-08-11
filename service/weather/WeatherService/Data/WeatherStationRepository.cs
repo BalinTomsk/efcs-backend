@@ -5,12 +5,16 @@ namespace WeatherService.Data;
 
 /// <summary>
 /// Loads the weather stations that should be processed, from <c>dbo.vwWeatherForecastToDay</c>.
+///
+/// <para><strong>This class holds no station cap of its own.</strong> The caller
+/// (<c>StationWorker</c>) passes the limit, which is the provider's remaining daily budget
+/// (<c>Weather:Worker:DailyLimit:*</c>, enforced across restarts by <c>WeatherApiUsageTracker</c>).
+/// Two unused constants — a 1,400 "default" and a 900 "Weather.gov" limit — used to sit here and
+/// shadowed the real knob; they were dead (nothing called the overloads that read them) and are
+/// removed so there is exactly one place that decides how many stations a pass may fetch.</para>
 /// </summary>
 public class WeatherStationRepository
 {
-    private const int DefaultStationLimit = 1400;
-    private const int UsWeatherGovStationLimit = 900;
-
     private const string FindSupportedStationsSql = """
         SELECT TOP (@limit) mli, lat, lon, state
         FROM dbo.vwWeatherForecastToDay
@@ -30,16 +34,10 @@ public class WeatherStationRepository
         _connectionFactory = connectionFactory;
     }
 
-    /// <summary>US stations, capped at the Weather.gov station budget.</summary>
-    public Task<IReadOnlyList<StationRef>> FindSupportedUsStationsAsync(CancellationToken ct = default) =>
-        FindSupportedStationsAsync("US", UsWeatherGovStationLimit, ct);
-
-    /// <summary>Stations for one country, capped at the default limit.</summary>
-    public Task<IReadOnlyList<StationRef>> FindSupportedStationsAsync(
-        string country, CancellationToken ct = default) =>
-        FindSupportedStationsAsync(country, DefaultStationLimit, ct);
-
-    /// <summary>Stations for one country, capped at <paramref name="limit"/>.</summary>
+    /// <summary>
+    /// Stations for one country, capped at <paramref name="limit"/> — supplied by the caller from the
+    /// provider's remaining daily budget.
+    /// </summary>
     public virtual async Task<IReadOnlyList<StationRef>> FindSupportedStationsAsync(
         string country, int limit, CancellationToken ct = default)
     {
