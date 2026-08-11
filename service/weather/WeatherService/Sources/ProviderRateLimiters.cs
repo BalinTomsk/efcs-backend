@@ -25,6 +25,7 @@ public sealed class ProviderRateLimiters : IDisposable
             [ResiliencePipelines.VisualCrossing] = Limiter(ResiliencePipelines.VisualCrossing, 1, TimeSpan.FromSeconds(1)),
             [ResiliencePipelines.GoogleWeather] = Limiter(ResiliencePipelines.GoogleWeather, 1, TimeSpan.FromSeconds(1)),
             [ResiliencePipelines.WeatherCanada] = Limiter(ResiliencePipelines.WeatherCanada, 1, TimeSpan.FromSeconds(5)),
+            [ResiliencePipelines.Wunderground] = Limiter(ResiliencePipelines.Wunderground, 1, TimeSpan.FromSeconds(1)),
         };
     }
 

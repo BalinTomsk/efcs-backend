@@ -55,6 +55,19 @@ public sealed class WorkerOptions
     /// <summary>Blank disables the Google Weather worker entirely, like <see cref="VisualCrossingApiKey"/>.</summary>
     public string GoogleWeatherApiKey { get; set; } = string.Empty;
 
+    /// <summary>
+    /// A PWS Contributor key has no lat/lon forecast endpoint, so each station costs two calls:
+    /// <c>v3/location/near</c> resolves the nearest personal weather station, then this fetches its
+    /// latest observation.
+    /// </summary>
+    public string WundergroundLocationBaseUrl { get; set; } = "https://api.weather.com/v3/location/near";
+
+    public string WundergroundObservationBaseUrl { get; set; } =
+        "https://api.weather.com/v2/pws/observations/current";
+
+    /// <summary>Blank disables the Wunderground worker entirely, like <see cref="GoogleWeatherApiKey"/>.</summary>
+    public string WundergroundApiKey { get; set; } = string.Empty;
+
     public ProviderToggleOptions Enable { get; set; } = new();
 
     public ProviderTimeoutOptions Timeout { get; set; } = new();
@@ -84,6 +97,8 @@ public sealed class WorkerOptions
         public bool GoogleWeather { get; set; } = true;
 
         public bool WeatherCanada { get; set; } = true;
+
+        public bool Wunderground { get; set; } = true;
     }
 
     /// <summary>
@@ -108,6 +123,8 @@ public sealed class WorkerOptions
         public int GoogleWeather { get; set; }
 
         public int WeatherCanada { get; set; }
+
+        public int Wunderground { get; set; }
     }
 
     /// <summary>Inline handling of an upstream HTTP 429, before any retry strategy sees the failure.</summary>
@@ -131,13 +148,33 @@ public sealed class WorkerOptions
     {
         public int WeatherGov { get; set; } = 900;
 
+        /// <summary>
+        /// Open-Meteo serves <strong>CA</strong> (see <c>OpenMeteoCa</c>). Sized to cover every Canadian
+        /// station in a single day: CA eligibility is currently ~1,510 and is bounded by the 2,219 CA
+        /// stations that exist, so 2,300 covers the whole country with headroom. Was 1,400, which left
+        /// CA short and relied on the view's <c>ORDER BY NEWID()</c> to rotate the shortfall across days.
+        /// A generous cap costs nothing — the worker requests
+        /// <c>Math.Min(totalSupportedStations, dailyLimit)</c>, so it never fetches more than exists —
+        /// and Open-Meteo is free.
+        /// </summary>
         public int OpenMeteo { get; set; } = 1400;
 
         public int VisualCrossing { get; set; } = 900;
 
         public int GoogleWeather { get; set; } = 161;
 
-        public int WeatherCanada { get; set; } = 900;
+        /// <summary>
+        /// Environment Canada serves <strong>CA</strong> (see <c>WeatherCanadaCa</c>) — raised from 900
+        /// for the same reason as <see cref="OpenMeteo"/>, so the CA-native provider can also reach every
+        /// Canadian station rather than a rotating 900-station slice. Free public feed.
+        /// </summary>
+        public int WeatherCanada { get; set; } = 2300;
+
+        /// <summary>
+        /// Each station costs two Wunderground calls (nearest-station lookup + observation), so the
+        /// effective call volume against the key's quota is roughly double this station count.
+        /// </summary>
+        public int Wunderground { get; set; } = 450;
     }
 
     public sealed class PostProcessingOptions

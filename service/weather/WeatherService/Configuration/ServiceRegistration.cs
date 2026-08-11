@@ -60,12 +60,14 @@ public static class ServiceRegistration
         services.AddSingleton<VisualCrossingFetcher>();
         services.AddSingleton<GoogleWeatherFetcher>();
         services.AddSingleton<WeatherCanadaFetcher>();
+        services.AddSingleton<WundergroundFetcher>();
 
         services.AddSingleton<StationProcessorOpen>();
         services.AddSingleton<StationProcessorWeatherGov>();
         services.AddSingleton<StationProcessorVisualCrossing>();
         services.AddSingleton<StationProcessorGoogleWeather>();
         services.AddSingleton<StationProcessorWeatherCanada>();
+        services.AddSingleton<StationProcessorWunderground>();
 
         services.AddSingleton<StationPostProcessingService>();
         services.AddSingleton<WeatherApiUsageTracker>();

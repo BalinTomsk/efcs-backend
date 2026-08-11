@@ -35,10 +35,11 @@ public static class ResiliencePipelines
     public const string VisualCrossing = "visualCrossing";
     public const string GoogleWeather = "googleWeather";
     public const string WeatherCanada = "weatherCanada";
+    public const string Wunderground = "wunderground";
 
     /// <summary>Every upstream provider pipeline, in registration order.</summary>
     public static readonly string[] FeedPipelines =
-        [OpenMeteo, WeatherGov, VisualCrossing, GoogleWeather, WeatherCanada];
+        [OpenMeteo, WeatherGov, VisualCrossing, GoogleWeather, WeatherCanada, Wunderground];
 
     public static IServiceCollection AddWeatherResiliencePipelines(this IServiceCollection services)
     {

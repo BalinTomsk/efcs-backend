@@ -44,6 +44,34 @@ public class StationWorkerTests
     }
 
     [Test]
+    public async Task CaProviders_DailyLimitCoversEveryCanadianStation()
+    {
+        // CA is served by exactly two workers, OpenMeteoCa ("open") and WeatherCanadaCa
+        // ("weather-canada"). Their daily limits are what decide whether one day's work can reach every
+        // Canadian station: below the eligible count, the view's ORDER BY NEWID() just rotates a slice
+        // and some stations wait days for weather. CA eligibility (~1,510) is bounded above by the 2,219
+        // CA stations that exist, so both limits must clear that ceiling.
+        const int caStationCeiling = 2219;
+        var limits = new WorkerOptions.DailyLimitOptions();
+
+        await Assert.That(limits.OpenMeteo).IsGreaterThanOrEqualTo(caStationCeiling);
+        await Assert.That(limits.WeatherCanada).IsGreaterThanOrEqualTo(caStationCeiling);
+    }
+
+    [Test]
+    public async Task CaPacing_StillFitsAFullPassInsideOneDay()
+    {
+        // Raising the cap also tightens the derived gap (12h / limit). Guard the other end: a full CA
+        // pass at the new limit must still fit in a day, and must not collapse onto the burst floor.
+        var limits = new WorkerOptions.DailyLimitOptions();
+        long gapMs = StationWorker.CalculateDelayMs(timeoutSeconds: 0, dailyLimit: limits.OpenMeteo);
+
+        await Assert.That(gapMs).IsGreaterThan(2000L); // not pinned to the floor
+        long fullPassMs = gapMs * 1510;                // current CA eligibility
+        await Assert.That(fullPassMs).IsLessThan(24L * 60 * 60 * 1000);
+    }
+
+    [Test]
     public async Task DerivedGap_NeverDropsBelowTheFloor()
     {
         // A nonsensically large limit must not turn the cycle into a burst.
@@ -244,6 +272,8 @@ public class StationWorkerTests
             .IsEqualTo("VISUAL_CROSSING_API_KEY is not configured");
         await Assert.That(StationWorker.WorkerDisabledReason("google-weather", options))
             .IsEqualTo("GOOGLE_WEATHER_API_KEY is not configured");
+        await Assert.That(StationWorker.WorkerDisabledReason("wunderground", options))
+            .IsEqualTo("WUNDERGROUND_API_KEY is not configured");
     }
 
     [Test]
@@ -264,10 +294,12 @@ public class StationWorkerTests
         {
             VisualCrossingApiKey = "vc-key",
             GoogleWeatherApiKey = "gw-key",
+            WundergroundApiKey = "wu-key",
         };
 
         await Assert.That(StationWorker.WorkerDisabledReason("visual-crossing", options)).IsNull();
         await Assert.That(StationWorker.WorkerDisabledReason("google-weather", options)).IsNull();
+        await Assert.That(StationWorker.WorkerDisabledReason("wunderground", options)).IsNull();
     }
 
     [Test]
@@ -289,6 +321,7 @@ public class StationWorkerTests
         await AssertDisabledByToggle("visual-crossing", "VISUAL_CROSSING_ENABLE", o => o.Enable.VisualCrossing = false);
         await AssertDisabledByToggle("google-weather", "GOOGLE_WEATHER_ENABLE", o => o.Enable.GoogleWeather = false);
         await AssertDisabledByToggle("weather-canada", "WEATHER_CANADA_ENABLE", o => o.Enable.WeatherCanada = false);
+        await AssertDisabledByToggle("wunderground", "WUNDERGROUND_ENABLE", o => o.Enable.Wunderground = false);
     }
 
     [Test]
@@ -412,6 +445,7 @@ public class StationWorkerTests
                 repository,
                 new FakeProcessor(harness),
                 new FakeProcessorWeatherGov(harness),
+                null!,
                 null!,
                 null!,
                 null!,

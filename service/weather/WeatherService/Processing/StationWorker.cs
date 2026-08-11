@@ -52,8 +52,12 @@ public class StationWorker : BackgroundService
         "weather-canada", "Weather Canada", "CA",
         new StationRef("STARTUP-WEATHER-CANADA-CA", 43.6532, -79.3832, "ON"));
 
+    private static readonly WorkerDefinition WundergroundUs = new(
+        "wunderground", "Wunderground", "US",
+        new StationRef("STARTUP-WUNDERGROUND-US", 48.3060, -120.6543, "WA"));
+
     private static readonly WorkerDefinition[] Workers =
-        [WeatherGovUs, OpenMeteoCa, VisualCrossingUs, GoogleWeatherUs, WeatherCanadaCa];
+        [WeatherGovUs, OpenMeteoCa, VisualCrossingUs, GoogleWeatherUs, WeatherCanadaCa, WundergroundUs];
 
     private readonly WeatherStationRepository _stationRepository;
     private readonly StationProcessorOpen _stationProcessorOpen;
@@ -61,6 +65,7 @@ public class StationWorker : BackgroundService
     private readonly StationProcessorVisualCrossing _stationProcessorVisualCrossing;
     private readonly StationProcessorGoogleWeather _stationProcessorGoogleWeather;
     private readonly StationProcessorWeatherCanada _stationProcessorWeatherCanada;
+    private readonly StationProcessorWunderground _stationProcessorWunderground;
     private readonly StationPostProcessingService _postProcessingService;
     private readonly CycleReportRecorder _cycleReportRecorder;
     private readonly WeatherApiUsageTracker _usageTracker;
@@ -75,6 +80,7 @@ public class StationWorker : BackgroundService
         StationProcessorVisualCrossing stationProcessorVisualCrossing,
         StationProcessorGoogleWeather stationProcessorGoogleWeather,
         StationProcessorWeatherCanada stationProcessorWeatherCanada,
+        StationProcessorWunderground stationProcessorWunderground,
         StationPostProcessingService postProcessingService,
         CycleReportRecorder cycleReportRecorder,
         WeatherApiUsageTracker usageTracker,
@@ -88,6 +94,7 @@ public class StationWorker : BackgroundService
         _stationProcessorVisualCrossing = stationProcessorVisualCrossing;
         _stationProcessorGoogleWeather = stationProcessorGoogleWeather;
         _stationProcessorWeatherCanada = stationProcessorWeatherCanada;
+        _stationProcessorWunderground = stationProcessorWunderground;
         _postProcessingService = postProcessingService;
         _cycleReportRecorder = cycleReportRecorder;
         _usageTracker = usageTracker;
@@ -159,6 +166,8 @@ public class StationWorker : BackgroundService
             "google-weather" => (options.Enable.GoogleWeather, "GOOGLE_WEATHER_ENABLE",
                 options.GoogleWeatherApiKey, "GOOGLE_WEATHER_API_KEY"),
             "weather-canada" => (options.Enable.WeatherCanada, "WEATHER_CANADA_ENABLE", null, null),
+            "wunderground" => (options.Enable.Wunderground, "WUNDERGROUND_ENABLE",
+                options.WundergroundApiKey, "WUNDERGROUND_API_KEY"),
             _ => (true, string.Empty, null, null),
         };
 
@@ -586,6 +595,7 @@ public class StationWorker : BackgroundService
         "visual-crossing" => _stationProcessorVisualCrossing,
         "google-weather" => _stationProcessorGoogleWeather,
         "weather-canada" => _stationProcessorWeatherCanada,
+        "wunderground" => _stationProcessorWunderground,
         _ => _stationProcessorOpen,
     };
 
@@ -595,6 +605,7 @@ public class StationWorker : BackgroundService
         "visual-crossing" => _options.DailyLimit.VisualCrossing,
         "google-weather" => _options.DailyLimit.GoogleWeather,
         "weather-canada" => _options.DailyLimit.WeatherCanada,
+        "wunderground" => _options.DailyLimit.Wunderground,
         _ => _options.DailyLimit.OpenMeteo,
     };
 
@@ -605,6 +616,7 @@ public class StationWorker : BackgroundService
         "visual-crossing" => _options.Timeout.VisualCrossing,
         "google-weather" => _options.Timeout.GoogleWeather,
         "weather-canada" => _options.Timeout.WeatherCanada,
+        "wunderground" => _options.Timeout.Wunderground,
         _ => _options.Timeout.OpenMeteo,
     };
 

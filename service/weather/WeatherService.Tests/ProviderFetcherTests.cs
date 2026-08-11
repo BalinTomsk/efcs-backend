@@ -138,6 +138,82 @@ public class ProviderFetcherTests
         await Assert.That(url).Contains("unitsSystem=IMPERIAL");
     }
 
+    [Test]
+    public async Task Wunderground_MissingKeyFailsBeforeAnyRequest()
+    {
+        var handler = Ok("""{"ok":true}""");
+        WundergroundFetcher fetcher = Wunderground(handler, options => options.WundergroundApiKey = "");
+
+        await Assert.That(() => fetcher.FetchCurrentAsync(47.5, -122.3)).Throws<IOException>();
+        await Assert.That(handler.RequestCount).IsZero();
+    }
+
+    [Test]
+    public async Task Wunderground_ResolvesNearestStationThenFetchesItsObservation()
+    {
+        const string observation = """{"observations":[{"stationID":"KTESTPWS1"}]}""";
+        var handler = new StubHandler(request => request.RequestUri!.AbsolutePath.Contains("location")
+            ? new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """{"location":{"stationId":["KTESTPWS1","KTESTPWS2"]}}""", Encoding.UTF8, "application/json"),
+            }
+            : new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(observation, Encoding.UTF8, "application/json"),
+            });
+        WundergroundFetcher fetcher = Wunderground(handler, options => options.WundergroundApiKey = "abc");
+
+        string result = await fetcher.FetchCurrentAsync(40.7128, -74.0060);
+
+        await Assert.That(result).IsEqualTo(observation);
+        await Assert.That(handler.RequestCount).IsEqualTo(2);
+    }
+
+    [Test]
+    public async Task Wunderground_NoNearbyStationIsASkip()
+    {
+        // The location lookup succeeding with an empty stationId array means "nothing nearby" -- a
+        // normal skip for this water station, not a failure, and the observation call never happens.
+        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"location":{"stationId":[]}}""", Encoding.UTF8, "application/json"),
+        });
+        WundergroundFetcher fetcher = Wunderground(handler, options => options.WundergroundApiKey = "abc");
+
+        await Assert.That(() => fetcher.FetchCurrentAsync(1.0, 2.0)).Throws<FileNotFoundException>();
+        await Assert.That(handler.RequestCount).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task Wunderground_LocationLookupUsesGeocodeAndPwsProduct()
+    {
+        var requests = new List<Uri>();
+        var recorder = new StubHandler(request =>
+        {
+            requests.Add(request.RequestUri!);
+            return request.RequestUri!.AbsolutePath.Contains("location")
+                ? new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        """{"location":{"stationId":["KTESTPWS1"]}}""", Encoding.UTF8, "application/json"),
+                }
+                : new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("""{"observations":[]}""", Encoding.UTF8, "application/json"),
+                };
+        });
+        WundergroundFetcher fetcher = Wunderground(recorder, options => options.WundergroundApiKey = "abc");
+
+        await fetcher.FetchCurrentAsync(40.7128, -74.0060);
+
+        string locationUrl = requests[0].ToString();
+        await Assert.That(locationUrl).Contains("geocode=40.7128,-74.006");
+        await Assert.That(locationUrl).Contains("product=pws");
+        string observationUrl = requests[1].ToString();
+        await Assert.That(observationUrl).Contains("stationId=KTESTPWS1");
+    }
+
     // --- helpers -----------------------------------------------------------------------------------
 
     private static WeatherGovFetcher WeatherGov(HttpMessageHandler handler, Action<WorkerOptions>? customise = null) =>
@@ -158,6 +234,11 @@ public class ProviderFetcherTests
     private static GoogleWeatherFetcher GoogleWeather(HttpMessageHandler handler, Action<WorkerOptions>? customise = null) =>
         Fetcher(handler, (factory, options, pipelines, limiters) =>
             new GoogleWeatherFetcher(factory, options, pipelines, limiters, NullLogger<GoogleWeatherFetcher>.Instance),
+            customise);
+
+    private static WundergroundFetcher Wunderground(HttpMessageHandler handler, Action<WorkerOptions>? customise = null) =>
+        Fetcher(handler, (factory, options, pipelines, limiters) =>
+            new WundergroundFetcher(factory, options, pipelines, limiters, NullLogger<WundergroundFetcher>.Instance),
             customise);
 
     private static StubHandler Ok(string body) => new(_ => new HttpResponseMessage(HttpStatusCode.OK)
