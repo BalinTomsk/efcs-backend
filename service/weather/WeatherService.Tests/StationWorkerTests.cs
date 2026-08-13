@@ -486,7 +486,7 @@ public class StationWorkerTests
 
     /// <summary>Stands in for the Weather.gov processor the US worker actually uses.</summary>
     private sealed class FakeProcessorWeatherGov(Harness harness)
-        : StationProcessorWeatherGov(null!, null!, null!, NullLogger<StationProcessorWeatherGov>.Instance)
+        : StationProcessorWeatherGov(null!, null!, null!, null!, NullLogger<StationProcessorWeatherGov>.Instance)
     {
         public override Task<ProcessingOutcome> ProcessAsync(
             StationRef station, string country, CancellationToken ct = default)

@@ -66,6 +66,7 @@ public static class ServiceRegistration
         // Provider knowledge lives in converters now, not in T-SQL inside a database trigger.
         services.AddSingleton<OpenMeteoConverter>();
         services.AddSingleton<VisualCrossingConverter>();
+        services.AddSingleton<WeatherGovConverter>();
 
         services.AddSingleton<StationProcessorOpen>();
         services.AddSingleton<StationProcessorWeatherGov>();
