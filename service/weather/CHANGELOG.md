@@ -4,6 +4,30 @@ All notable changes for this service must be recorded in this file.
 
 ## Unreleased
 
+- **weather.gov now fetches the GRIDPOINT FORECAST instead of the latest observation**, so it finally
+  produces forecast rows. The service was calling `/stations/{id}/observations/latest` — current
+  conditions, which no converter could honestly turn into a multi-day forecast no matter what parsed
+  it. It now calls `/points/{lat},{lon}` for the grid cell's forecast URL and then that URL, with
+  `units=si` so temperatures arrive in °C and winds in km/h and nothing needs converting.
+
+  `WeatherGovConverter` assembles NWS **periods** into calendar days: each period covers about half a
+  day and is flagged `isDaytime`, so the daytime one carries the high and the night one the low. A
+  response issued in the evening starts with "Tonight", giving a day with no daytime half at all —
+  that case is covered by a test rather than left to chance. `windSpeed` is a human string
+  ("10 to 15 km/h"), so the upper bound is parsed out.
+
+  Two honest gaps, both deliberate: `/forecast` publishes a precipitation CHANCE but never a QUANTITY
+  (that lives in the raw `/gridpoints` document), so `precipMm` stays null rather than being invented
+  as 0 — which would read as "no rain fell". And NWS gives a cardinal direction, never a bearing, so
+  `windDegrees` is null while `windDirection` is set.
+
+  Costs one extra call per station: the forecast URL is not derivable from a coordinate. Same shape as
+  Wunderground, which has always cost two.
+
+  `WeatherGovStationResolver` and its `dbo.weather_gov_station` cache are no longer on this path — a
+  forecast is keyed by grid cell, not by observation station. Both are left in place for the
+  observation endpoint but now have no caller here.
+
 - **CA daily limits raised to 2,300** (`OpenMeteo`, `WeatherCanada`) so one day's work reaches every
   Canadian station instead of rotating a slice. Below the eligible count the view's `ORDER BY NEWID()`
   just shuffles which stations get weather, and the rest wait days.
