@@ -501,7 +501,7 @@ public class StationWorkerTests
     }
 
     private sealed class FakeProcessor(Harness harness)
-        : StationProcessorOpen(null!, null!, NullLogger<StationProcessorOpen>.Instance)
+        : StationProcessorOpen(null!, null!, null!, NullLogger<StationProcessorOpen>.Instance)
     {
         public override Task<ProcessingOutcome> ProcessAsync(
             StationRef station, string country, CancellationToken ct = default)

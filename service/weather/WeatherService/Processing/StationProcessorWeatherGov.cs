@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using WeatherService.Canonical;
 using WeatherService.Data;
 using WeatherService.Domain;
 using WeatherService.Sources;
@@ -33,7 +34,7 @@ public class StationProcessorWeatherGov : StationProcessorBase
         _log.LogDebug("Saving Weather.gov payload. station={Mli} state={State} bytes={Bytes}",
             station.Mli, station.State, json.Length);
         // Persisted under the WATER gauge's own mli, not the NWS station's id — ows_meteo is keyed by mli.
-        await _weatherDataRepository.SaveStationDataAsync(station.Mli, json, ct).ConfigureAwait(false);
+        await _weatherDataRepository.SaveStationDataAsync(station.Mli, json, WeatherSourceType.WeatherGov, ct).ConfigureAwait(false);
         _log.LogDebug("Processed station. station={Mli} state={State}", station.Mli, station.State);
     }
 

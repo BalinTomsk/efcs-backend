@@ -1,5 +1,6 @@
 using System.Net;
 using Microsoft.Extensions.Options;
+using WeatherService.Canonical;
 using WeatherService.Data;
 using WeatherService.Processing;
 using WeatherService.Reporting;
@@ -61,6 +62,10 @@ public static class ServiceRegistration
         services.AddSingleton<GoogleWeatherFetcher>();
         services.AddSingleton<WeatherCanadaFetcher>();
         services.AddSingleton<WundergroundFetcher>();
+
+        // Provider knowledge lives in converters now, not in T-SQL inside a database trigger.
+        services.AddSingleton<OpenMeteoConverter>();
+        services.AddSingleton<VisualCrossingConverter>();
 
         services.AddSingleton<StationProcessorOpen>();
         services.AddSingleton<StationProcessorWeatherGov>();

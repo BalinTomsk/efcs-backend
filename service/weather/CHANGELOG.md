@@ -2,6 +2,48 @@
 
 All notable changes for this service must be recorded in this file.
 
+## Unreleased
+
+- **CA daily limits raised to 2,300** (`OpenMeteo`, `WeatherCanada`) so one day's work reaches every
+  Canadian station instead of rotating a slice. Below the eligible count the view's `ORDER BY NEWID()`
+  just shuffles which stations get weather, and the rest wait days.
+
+  Two things were wrong, not one. `WorkerOptions.DailyLimitOptions.OpenMeteo` still read `1400` even
+  though its own XML comment already described the raise to 2,300 — the comment was written, the value
+  was not. And `appsettings.json` pinned **both** CA providers at the old numbers (`OpenMeteo` 1400,
+  `WeatherCanada` 900), which overrides the class defaults, so the earlier `WeatherCanada` raise had no
+  runtime effect at all. Both files now agree at 2,300, as do `.env.example` and the specification.
+
+  A generous cap costs nothing: the worker requests `Math.Min(totalSupportedStations, dailyLimit)`, so
+  it never fetches more stations than exist, and both providers are free public feeds. This makes
+  `StationWorkerTests.CaProviders_DailyLimitCoversEveryCanadianStation` pass — it had been failing on
+  main.
+
+- **Weather payloads are now converted to a canonical envelope before they are stored**, instead of the
+  raw provider document being parsed by T-SQL inside a database trigger. Each provider gets an
+  `IForecastConverter` (`Canonical/`) producing `fishfind.weather.forecast/v1` — see
+  `docs/specification.md` §8a.
+
+  Why: parsing lived in `dbo.TR_ows_meteo`, which **cannot raise** — an error there aborts this
+  service's `UPDATE` and discards the payload just fetched — so a document no parser understood
+  produced no rows and no error. A whole provider (Visual Crossing, ~230 US stations) went unnoticed
+  that way. A converter runs here, so it **throws** and the station is counted as failed. Adding a
+  provider now needs no database change.
+
+  Converters: `OpenMeteoConverter` (already metric; performs the hourly→daily reduction the database
+  used to do) and `VisualCrossingConverter` (°F→°C, mph→km/h, inches→mm; clips to today..today+6;
+  splits daily rainfall evenly). Both reproduce the T-SQL arithmetic exactly so station numbers do not
+  shift during the rollout, and their expectations match the Java service's converter tests.
+
+- **`ows_meteo.type` now records which provider served each station.** It was hardcoded to `2` for
+  every provider. `WeatherDataRepository.SaveStationDataAsync` takes the type and callers pass their own
+  `WeatherSourceType`: Open-Meteo 2, Visual Crossing 4, weather.gov 5, Environment Canada 6,
+  Weather Underground 7, Google Weather 8.
+
+  Requires the matching database change (`sp_ows_meteo_canonical` + `TR_ows_meteo` envelope routing),
+  already applied to prod. The legacy per-provider branches remain, so this service and the Java port
+  can be deployed independently and in any order.
+
 ## [10.1.1] - 2026-08-11
 
 **Fix: the weekly report's cycle-history buffer had gone stale relative to the real worker count.**

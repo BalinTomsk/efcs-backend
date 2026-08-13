@@ -1,8 +1,10 @@
 using System.Net;
 using System.Text;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using TUnit.Core;
+using WeatherService.Canonical;
 using WeatherService.Configuration;
 using WeatherService.Domain;
 using WeatherService.Processing;
@@ -75,14 +77,38 @@ public class StationProcessorTests
     }
 
     [Test]
-    public async Task OpenMeteo_PersistsTheFetchedPayload()
+    public async Task OpenMeteo_PersistsTheCanonicalEnvelopeNotTheRawPayload()
     {
         var repository = new FakeWeatherDataRepository();
         var processor = new StationProcessorOpen(
-            OpenMeteo("""{"x":1}"""), repository, NullLogger<StationProcessorOpen>.Instance);
+            OpenMeteo(OpenMeteoDocument), repository, new OpenMeteoConverter(),
+            NullLogger<StationProcessorOpen>.Instance);
 
         await Assert.That(await processor.ProcessAsync(Subject)).IsEqualTo(ProcessingOutcome.Processed);
-        await Assert.That(repository.Saved).IsEquivalentTo(new[] { ("MLI-1", """{"x":1}""") });
+        await Assert.That(repository.Saved).HasCount().EqualTo(1);
+
+        var (mli, json, sourceType) = repository.Saved[0];
+        await Assert.That(mli).IsEqualTo("MLI-1");
+        await Assert.That(sourceType).IsEqualTo(WeatherSourceType.OpenMeteo);
+
+        JsonNode envelope = JsonNode.Parse(json)!;
+        await Assert.That(envelope["schema"]!.GetValue<string>()).IsEqualTo("fishfind.weather.forecast/v1");
+        await Assert.That(envelope["days"]!.AsArray().Count).IsEqualTo(1);
+        // the provider's own document is still in there, so the payload stays replayable
+        await Assert.That(envelope["raw"]!["timezone"]!.GetValue<string>()).IsEqualTo("America/Los_Angeles");
+    }
+
+    [Test]
+    public async Task OpenMeteo_FailsTheStationWhenTheProviderChangesShape()
+    {
+        // The old T-SQL parser wrote nothing and reported success for this; it is now a counted failure.
+        var repository = new FakeWeatherDataRepository();
+        var processor = new StationProcessorOpen(
+            OpenMeteo("""{"x":1}"""), repository, new OpenMeteoConverter(),
+            NullLogger<StationProcessorOpen>.Instance);
+
+        await Assert.That(await processor.ProcessAsync(Subject)).IsEqualTo(ProcessingOutcome.Failed);
+        await Assert.That(repository.Saved).IsEmpty();
     }
 
     [Test]
@@ -90,7 +116,8 @@ public class StationProcessorTests
     {
         var repository = new FakeWeatherDataRepository();
         var processor = new StationProcessorOpen(
-            OpenMeteo(HttpStatusCode.InternalServerError), repository, NullLogger<StationProcessorOpen>.Instance);
+            OpenMeteo(HttpStatusCode.InternalServerError), repository, new OpenMeteoConverter(),
+            NullLogger<StationProcessorOpen>.Instance);
 
         await Assert.That(await processor.ProcessAsync(Subject)).IsEqualTo(ProcessingOutcome.Failed);
         await Assert.That(repository.Saved).IsEmpty();
@@ -105,7 +132,9 @@ public class StationProcessorTests
             NullLogger<StationProcessorWeatherGov>.Instance);
 
         await Assert.That(await processor.ProcessAsync(Subject)).IsEqualTo(ProcessingOutcome.Processed);
-        await Assert.That(repository.Saved).IsEquivalentTo(new[] { ("MLI-1", """{"g":1}""") });
+        // observations, not a forecast: stored raw, but now stamped with its own provider type
+        await Assert.That(repository.Saved)
+            .IsEquivalentTo(new[] { ("MLI-1", """{"g":1}""", WeatherSourceType.WeatherGov) });
     }
 
     [Test]
@@ -121,15 +150,41 @@ public class StationProcessorTests
     }
 
     [Test]
-    public async Task VisualCrossing_PersistsTheFetchedPayload()
+    public async Task VisualCrossing_PersistsTheCanonicalEnvelopeStampedWithItsProvider()
     {
         var repository = new FakeWeatherDataRepository();
         var processor = new StationProcessorVisualCrossing(
-            VisualCrossing("""{"v":1}"""), repository, NullLogger<StationProcessorVisualCrossing>.Instance);
+            VisualCrossing(VisualCrossingDocument), repository, new VisualCrossingConverter(),
+            NullLogger<StationProcessorVisualCrossing>.Instance);
 
         await Assert.That(await processor.ProcessAsync(Subject)).IsEqualTo(ProcessingOutcome.Processed);
-        await Assert.That(repository.Saved).IsEquivalentTo(new[] { ("MLI-1", """{"v":1}""") });
+        await Assert.That(repository.Saved).HasCount().EqualTo(1);
+
+        var (mli, json, sourceType) = repository.Saved[0];
+        await Assert.That(mli).IsEqualTo("MLI-1");
+        await Assert.That(sourceType).IsEqualTo(WeatherSourceType.VisualCrossing);
+        await Assert.That(JsonNode.Parse(json)!["provider"]!.GetValue<string>()).IsEqualTo("visual-crossing");
     }
+
+    /// <summary>A real Open-Meteo response, dated relative to now so the converter always accepts it.</summary>
+    private static string OpenMeteoDocument =>
+        $$"""
+          {"hourly":{"time":["{{DateTime.UtcNow:yyyy-MM-dd}}T23:00"],
+             "temperature_2m":[16.0],"rain":[0.0],"weather_code":[0]},
+           "daily":{"time":["{{DateTime.UtcNow:yyyy-MM-dd}}"],
+             "temperature_2m_max":[24.7],"temperature_2m_min":[11.8]},
+           "timezone":"America/Los_Angeles"}
+          """;
+
+    /// <summary>A real Visual Crossing response, dated today so it survives the today..today+6 clip.</summary>
+    private static string VisualCrossingDocument =>
+        $$"""
+          {"queryCost":1,"timezone":"America/Boise","days":[
+            {"datetime":"{{DateTime.UtcNow:yyyy-MM-dd}}","tempmax":85.0,"tempmin":62.0,"temp":74.1,
+             "humidity":39.7,"precip":0.0,"precipprob":6.0,"windspeed":12.8,"winddir":201.2,
+             "pressure":1009.7,"conditions":"Partially cloudy","description":"Partly cloudy.",
+             "icon":"partly-cloudy-day"}]}
+          """;
 
     [Test]
     public async Task GoogleWeather_PersistsTheFetchedPayload()
@@ -139,7 +194,8 @@ public class StationProcessorTests
             GoogleWeather("""{"gw":1}"""), repository, NullLogger<StationProcessorGoogleWeather>.Instance);
 
         await Assert.That(await processor.ProcessAsync(Subject)).IsEqualTo(ProcessingOutcome.Processed);
-        await Assert.That(repository.Saved).IsEquivalentTo(new[] { ("MLI-1", """{"gw":1}""") });
+        await Assert.That(repository.Saved)
+            .IsEquivalentTo(new[] { ("MLI-1", """{"gw":1}""", WeatherSourceType.GoogleWeather) });
     }
 
     // --- helpers -----------------------------------------------------------------------------------
