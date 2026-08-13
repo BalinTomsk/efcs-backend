@@ -157,7 +157,7 @@ public sealed class WorkerOptions
         /// <c>Math.Min(totalSupportedStations, dailyLimit)</c>, so it never fetches more than exists —
         /// and Open-Meteo is free.
         /// </summary>
-        public int OpenMeteo { get; set; } = 1400;
+        public int OpenMeteo { get; set; } = 2300;
 
         public int VisualCrossing { get; set; } = 900;
 

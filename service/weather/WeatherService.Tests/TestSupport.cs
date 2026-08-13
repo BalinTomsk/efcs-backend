@@ -46,11 +46,12 @@ internal static class TestSupport
     public sealed class FakeWeatherDataRepository()
         : WeatherDataRepository(null!, EmptyPipelines(), NullLogger<WeatherDataRepository>.Instance)
     {
-        public List<(string Mli, string Json)> Saved { get; } = [];
+        public List<(string Mli, string Json, int SourceType)> Saved { get; } = [];
 
-        public override Task SaveStationDataAsync(string mli, string jsonData, CancellationToken ct = default)
+        public override Task SaveStationDataAsync(
+            string mli, string jsonData, int sourceType, CancellationToken ct = default)
         {
-            Saved.Add((mli, jsonData));
+            Saved.Add((mli, jsonData, sourceType));
             return Task.CompletedTask;
         }
     }

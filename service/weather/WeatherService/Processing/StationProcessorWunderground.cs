@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using WeatherService.Canonical;
 using WeatherService.Data;
 using WeatherService.Domain;
 using WeatherService.Sources;
@@ -29,7 +30,7 @@ public class StationProcessorWunderground : StationProcessorBase
         string json = await _fetcher.FetchCurrentAsync(station.Latitude, station.Longitude, ct).ConfigureAwait(false);
         _log.LogDebug("Saving Wunderground payload. station={Mli} state={State} bytes={Bytes}",
             station.Mli, station.State, json.Length);
-        await _weatherDataRepository.SaveStationDataAsync(station.Mli, json, ct).ConfigureAwait(false);
+        await _weatherDataRepository.SaveStationDataAsync(station.Mli, json, WeatherSourceType.WundergroundObservations, ct).ConfigureAwait(false);
         _log.LogDebug("Processed station. station={Mli} state={State}", station.Mli, station.State);
     }
 

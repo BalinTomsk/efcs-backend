@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using WeatherService.Canonical;
 using WeatherService.Data;
 using WeatherService.Domain;
 using WeatherService.Sources;
@@ -30,7 +31,7 @@ public class StationProcessorWeatherCanada : StationProcessorBase
             .ConfigureAwait(false);
         _log.LogDebug("Saving Weather Canada payload. station={Mli} state={State} bytes={Bytes}",
             station.Mli, station.State, json.Length);
-        await _weatherDataRepository.SaveStationDataAsync(station.Mli, json, ct).ConfigureAwait(false);
+        await _weatherDataRepository.SaveStationDataAsync(station.Mli, json, WeatherSourceType.EnvironmentCanada, ct).ConfigureAwait(false);
         _log.LogDebug("Processed station. station={Mli} state={State}", station.Mli, station.State);
     }
 

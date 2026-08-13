@@ -21,8 +21,6 @@ namespace WeatherService.Data;
 /// </summary>
 public class WeatherDataRepository
 {
-    private const int SourceTypeRawJson = 2;
-
     private readonly ISqlConnectionFactory _connectionFactory;
     private readonly ResiliencePipeline _sql;
     private readonly ILogger<WeatherDataRepository> _log;
@@ -38,10 +36,18 @@ public class WeatherDataRepository
     }
 
     /// <summary>
-    /// Stores one station's raw provider payload verbatim. A blank payload is a no-op; a payload for
-    /// an <c>mli</c> with no matching row is logged and dropped, as there is nothing to update.
+    /// Stores one station's payload and records WHICH PROVIDER produced it in <c>type</c>. A blank
+    /// payload is a no-op; a payload for an <c>mli</c> with no matching row is logged and dropped, as
+    /// there is nothing to update.
+    ///
+    /// <para><c>type</c> used to be hardcoded to 2 for every provider, which made the column useless as
+    /// provenance and forced <c>dbo.TR_ows_meteo</c> to infer the document's shape — four providers'
+    /// payloads were indistinguishable from Open-Meteo and were silently discarded. Callers now pass
+    /// their own <see cref="WeatherService.Canonical.WeatherSourceType"/>.</para>
     /// </summary>
-    public virtual async Task SaveStationDataAsync(string mli, string jsonData, CancellationToken ct = default)
+    /// <param name="sourceType">provider identity; see <c>WeatherSourceType</c></param>
+    public virtual async Task SaveStationDataAsync(
+        string mli, string jsonData, int sourceType, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(mli))
         {
@@ -58,7 +64,7 @@ public class WeatherDataRepository
             await using var command = connection.CreateCommand();
             command.CommandType = CommandType.Text;
             command.CommandText = "UPDATE dbo.ows_meteo SET type = @type, ows = @ows, stamp = GETDATE() WHERE mli = @mli";
-            command.Parameters.Add("@type", SqlDbType.Int).Value = SourceTypeRawJson;
+            command.Parameters.Add("@type", SqlDbType.Int).Value = sourceType;
             command.Parameters.Add("@ows", SqlDbType.NVarChar, -1).Value = jsonData;
             command.Parameters.Add("@mli", SqlDbType.NVarChar, 128).Value = mli;
             return await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
