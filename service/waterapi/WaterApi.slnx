@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="WaterApi.Tests/WaterApi.Tests.csproj" />
+  <Project Path="WaterApi/WaterApi.csproj" />
+</Solution>

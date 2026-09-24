@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="TUnit" Version="0.5.*" />
+    <PackageReference Include="TUnit.Engine" Version="0.5.*" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\WaterApi\WaterApi.csproj" />
+  </ItemGroup>
+
+</Project>
