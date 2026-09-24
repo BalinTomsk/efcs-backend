@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>WaterApi</RootNamespace>
+    <AssemblyName>WaterApi</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- NOTE: do NOT enable InvariantGlobalization — Microsoft.Data.SqlClient throws
+         "Globalization Invariant Mode is not supported" at connection open. The runtime image
+         installs ICU (libicu) instead. -->
+    <!-- Version drives the /health "version" field; keep in step with the service release tag. -->
+    <Version>0.1.1</Version>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="WaterApi.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\docs\**\*" Link="docs\%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- SQL Server driver (cross-platform, runs on Debian in the container). -->
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="6.0.2" />
+    <!-- Resilience: retry + circuit breaker around the cache refresh (Resilience4j equivalent). -->
+    <PackageReference Include="Polly.Core" Version="8.5.2" />
+    <PackageReference Include="Polly.Extensions" Version="8.5.2" />
+    <!-- Structured JSON logging with a 7-day rolling file (logback + logstash-encoder equivalent). -->
+    <PackageReference Include="Serilog.AspNetCore" Version="9.0.0" />
+    <PackageReference Include="Serilog.Formatting.Compact" Version="3.0.0" />
+    <!-- Prometheus metrics endpoint (Micrometer/Prometheus equivalent). -->
+    <PackageReference Include="prometheus-net.AspNetCore" Version="8.2.1" />
+  </ItemGroup>
+
+</Project>

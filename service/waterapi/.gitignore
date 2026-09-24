@@ -1,0 +1,17 @@
+# .NET build output
+bin/
+obj/
+publish/
+*.user
+
+# Local runtime logs
+logs/
+
+# Secrets / local env (never commit)
+.env
+secret/
+
+# IDE
+.vs/
+.vscode/
+.idea/

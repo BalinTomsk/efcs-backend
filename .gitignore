@@ -9,6 +9,8 @@ service/OWMService/packages
 service/OWMService/Res/OWMService.reg
 service/OWMService/Res/OWMSservice
 service/waterservice/docs/*
+service/waterapi/docs/*
+service/waterapi/CLAUDE.md
 .vs
 
 
@@ -39,3 +41,6 @@ OWMService/Res/OWMService.reg
 Skills/*
 docs/*
 service/weather/CLAUDE.md
+
+# Per-folder Claude session logs (memory.md) stay local, never in git
+**/memory.md
