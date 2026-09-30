@@ -1,0 +1,2 @@
+# Shell scripts must keep LF endings or they fail with "bad interpreter" on Linux.
+.githooks/** text eol=lf

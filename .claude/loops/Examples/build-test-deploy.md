@@ -1,26 +1,24 @@
 # Loop: Build, Test, Deploy
 
-Build Docker image, run tests, deploy to staging.
+Build and test one service, then stop for a deploy decision.
 
 ## Prompt
 
 ```
 /loop
-Build, test, and deploy EFCS backend.
+Build and test one EFCS backend service.
+
+Service directory: `service/<waterservice|weather|waterapi>` — ask if not stated.
 
 Each iteration:
-1. Check git status for uncommitted .cs/.yml changes
-2. If none, wait and check again
-3. Build Docker image: `docker build -t efcs-backend:latest .`
-4. If build fails: show error, stop immediately
-5. Run unit tests in container: `docker run ... --entrypoint="dotnet test"`
-6. If tests fail: show output, ask user "Fix and retry?" — STOP if NO
-7. Push image to registry if approved by user
-8. Commit changes with "build: [brief]"
-9. After 3 successful cycles, ask user "Deploy to staging?" — STOP if NO
-10. On approval: deploy via Rancher (or manual if no API)
-11. Verify staging endpoint responds (smoke test)
-12. Stop
+1. `dotnet build`, then `dotnet run --project <Service>.Tests`
+2. On a build or test failure: show the failing output and stop — do not auto-fix
+3. On success: `docker build -t <service>:dev .` in that same directory
+4. Report build + test status and ask whether to deploy
+
+Deploying is out of scope here. On approval, hand off to the service's deploy
+skill (`update-water` / `update-weather`), which owns tagging, GHCR, the droplet,
+and verification. There is no staging environment.
 
 Max iterations: 5
 ```
@@ -29,14 +27,14 @@ Max iterations: 5
 
 - Iterating on backend fixes with immediate feedback
 - Testing Docker builds locally before pushing
-- Validating unit tests before staging deploy
+- Validating unit tests before a tagged deploy
 
 ## Stop Condition
 
-User says "done" or breaks loop with Ctrl+C.
+Max iterations reached, a build or test fails, or the user says "done".
 
 ## Notes
 
 - Requires local Docker (Rancher Desktop on Windows)
-- Tests run inside container (isolated environment)
-- No prod deployment; staging only
+- Tests run on the host via `dotnet`; the container build is a separate check
+- This loop never deploys — the deploy skills do
