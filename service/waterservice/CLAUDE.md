@@ -58,20 +58,13 @@ It must always reflect the current state of the code.
 
 ---
 
-##IMPORTANT
-Explicitly follows database schema at:
+## Git and database
+
+Database schema lives at:
 - @srv/../../envfish-db
 
-- **DO NOT COMMIT without explicit user permission.**
-- **DO NOT PUSH without explicit user permission.**
-- **DO NOT CREATE, MERGE, OR CLOSE PULL REQUESTS without explicit user permission.**
-- When code changes are requested, make the file edits and stop with a status summary unless the
-  user explicitly asks for Git actions.
-
-- Local project skills live under `.claude/skills` inside this service. When the user asks to run or
-  use a skill by name, you MUST first look for and use `.claude/skills/<skill-name>/SKILL.md`.
-  Only search repo-level `Skills` directories or global skill registries if that project-level file
-  does not exist.
+- **Do not commit, push, or create/merge/close pull requests without explicit user permission.** Make
+  the file edits, then stop with a status summary unless the user asks for Git actions.
 
 - **Before making ANY database change** (schema, stored proc, function, view, seed data, or any
 bug fix that touches the DB), **read `c:\envoinx\fishfind\envfish-db\CLAUDE.md `
@@ -80,12 +73,10 @@ first** — it is the authoritative DB workflow (never edit the generated `ffi2.
 to verify the fix; run `mssql\UNIT_TESTS\autorun.bat`). That file lives in the separate
 `efch-backend` repo and does NOT auto-load in this project, so it must be opened explicitly.
 
-## Local Claude skills
+## Deployment
 
-- Deployment skill: `.claude/skills/update-water/SKILL.md`
-- Use `update-water` when asked to deploy/update/release `water-station-pusher`, build and push a tagged Docker image, install it on the DigitalOcean droplet, or verify the deployed service.
-- A version tag is required. If the user does not provide one, ask for it before running deployment commands.
-- The deployment runbook/source of truth is `docs/do-update.md`; keep it aligned with the skill before deploying.
+- The `update-water` skill deploys this service; its own description covers when it applies.
+- `docs/do-update.md` is the runbook and the source of truth — keep it aligned with the skill before deploying.
 
 ---
 
@@ -139,7 +130,7 @@ to verify the fix; run `mssql\UNIT_TESTS\autorun.bat`). That file lives in the s
 
 ```bash
 dotnet build
-dotnet run --project WaterService.Tests        # 57 TUnit tests
+dotnet run --project WaterService.Tests        # TUnit
 ```
 
 **Test seams:** `WaterStationRepository`, `StationPostProcessingService`, `StationProcessorCA`/`US` and
@@ -151,12 +142,6 @@ or DI indirection.
 Docker: multi-stage build publishing a **self-contained linux-x64** app onto `debian:trixie-slim`
 (GA .NET 10 has no Debian-trixie base image), non-root uid 10001. **Do not set `InvariantGlobalization`** —
 Microsoft.Data.SqlClient requires ICU (`libicu76` is installed in the image).
-
-## Keeping docs in sync — IMPORTANT
-
-`docs/specification.md` must always reflect the current state of the code. Treat every source change as two
-steps: ① change the code, ② update `docs/specification.md` (and this file / `docs/do-update.md` if behavior,
-structure, or deployment changed).
 
 ## Secrets
 

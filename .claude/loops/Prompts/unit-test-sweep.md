@@ -1,21 +1,18 @@
 # Quick Prompt: Unit Test Sweep
 
-Run all tests, report coverage, find failing tests.
+Run a service's tests with coverage and report what failed.
 
 ## Prompt
 
 ```
 /loop
-Run unit tests and report findings.
+Run the service's tests with coverage, then report: pass/fail/skip counts,
+each failing test with an error snippet, and per-class coverage.
 
-1. `dotnet test --logger=trx` — run all tests, generate XML report
-2. Parse test report: count passed, failed, skipped
-3. Show failing tests (if any) with error snippets
-4. Run `dotnet test /p:CollectCoverage=true` — coverage report
-5. Show coverage % by class
-6. Ask user: "Fix any failures?" — STOP if NO
-7. If YES: ask which test, then loop back to step 1
-8. After 3 loops or user says "done": stop
+    dotnet test --logger=trx /p:CollectCoverage=true
+
+If anything failed, ask which failure to fix. Fix only that one, re-run, and
+report again. Stop when the user says "done" or the cap is reached.
 
 Max iterations: 3
 ```

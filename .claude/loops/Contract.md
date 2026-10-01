@@ -2,10 +2,9 @@
 
 Safety guardrails for backend automation loops.
 
-## Stop Conditions (Non-Negotiable)
+## Stop Conditions
 
-- **Never deploy without explicit user approval** — ask first, wait for "yes"
-- **Stop on permission denial** — never retry or work around
+- **Never deploy without explicit user approval** — ask, and wait for the user to approve
 - **Stop on test failures** — don't auto-fix; let user decide
 - **Stop on Docker/container errors** — don't ignore build failures
 - **Stop on database migration errors** — verify schema before proceeding
@@ -13,8 +12,8 @@ Safety guardrails for backend automation loops.
 
 ## Tone & Scope
 
-- **Terse output** — no narration or trailing summaries
-- **Commit-first workflow** — never leave uncommitted work
+- **No step-by-step narration** — close a task with a short status summary of what changed and what was verified
+- **Never commit, push, or open/merge/close a PR without explicit user permission** — make the edits, then stop with that summary (same rule as each service's CLAUDE.md)
 - **Test before claiming success** — run unit tests locally
 - **Verify against live DB** — don't assume schema matches main
 - **No force-push** — always merge or rebase cleanly
@@ -47,5 +46,6 @@ Safety guardrails for backend automation loops.
 
 - **Read prod schema live before any change** — don't trust main branch migrations
 - **Test migrations locally first** — use local MSSQL 2022 with stub data
-- **SQL Server QUOTED_IDENTIFIER gotchas** — see CLAUDE.md
+- **DB workflow authority** — `c:\envoinx\fishfind\envfish-db\CLAUDE.md`; it does not auto-load, so open it
+  explicitly before any schema, proc, view, or seed-data change
 - **No nested SqlDataReader** — materialize rows first; no MARS

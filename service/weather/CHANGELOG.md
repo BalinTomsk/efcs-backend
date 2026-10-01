@@ -200,7 +200,7 @@ and the first resolution round-tripped through the new proc into `dbo.weather_go
 Initial C#/.NET 10 port of the Java `weather-station-pusher`
 (`efj-backend/service/weather`, Spring Boot 3.5.16 / Java 21).
 
-**Deployed to prod 2026-08-08** — `debian-csnode` (137.184.218.128), image
+**Deployed to prod 2026-08-08** — `debian-csnode`, image
 `ghcr.io/balintomsk/weather-station-pusher-cs:10.0.0`, port 8081, state on `volume-env` at
 `/mnt/volume_env/weatherservice`. Version numbering follows the C# port line (10.x) to keep it
 distinct from the Java service's 1.x, matching `water-station-pusher-cs`. First-time droplet setup
