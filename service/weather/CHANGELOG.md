@@ -230,7 +230,7 @@ Ported in full:
 - Health endpoints on port 8081 at the original Actuator paths.
 - `--console [--station=<MLI>]` one-shot mode.
 
-Deviations from the Java implementation are enumerated in `CLAUDE.md` → "Deliberate deviations". The two
+Deviations from the Java implementation are enumerated in `AGENTS.md` → "Deliberate deviations". The two
 behavioural ones:
 
 - A failed cycle waits a minute before retrying; the Java loop spins at thousands of iterations a second
