@@ -203,7 +203,7 @@ short line.
 ## Changelog rules
 
 - **This file is the single place for changelog entries for this service.** Do not start a
-  `## Changelog` section in `CLAUDE.md`, `README.md`, or `docs/specification.md` — link here instead.
+  `## Changelog` section in `AGENTS.md`, `README.md`, or `docs/specification.md` — link here instead.
 - Add to `## [Unreleased]` as you work; promote it to a version heading when a tag is cut, and bump
   `<Version>` in `WaterService/WaterService.csproj` in the same change.
 - Group entries under `Added` / `Changed` / `Fixed` / `Removed` / `Security`.

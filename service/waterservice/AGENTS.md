@@ -47,7 +47,7 @@ It must always reflect the current state of the code.
 
 - Whenever **any source file** (`*.cs`, `WaterService.slnx`, `WaterService.csproj`, `launchSettings.json`,
   `Dockerfile`, etc.) is created, modified, or deleted — update `docs/specification.md` to match.
-- Whenever **this `claude.md`** is updated — apply the same change to `docs/specification.md`
+- Whenever **this `AGENTS.md`** is updated — apply the same change to `docs/specification.md`
   if it affects behaviour, structure, or configuration.
 - Whenever behaviour changes, also add an entry to `CHANGELOG.md` under `## [Unreleased]`.
 - `docs/specification.md` must be sufficient on its own for a developer (or Claude) to
@@ -67,7 +67,7 @@ Database schema lives at:
   the file edits, then stop with a status summary unless the user asks for Git actions.
 
 - **Before making ANY database change** (schema, stored proc, function, view, seed data, or any
-bug fix that touches the DB), **read `c:\envoinx\fishfind\envfish-db\CLAUDE.md `
+bug fix that touches the DB), **read `c:\envoinx\fishfind\envfish-db\AGENTS.md `
 first** — it is the authoritative DB workflow (never edit the generated `ffi2.sql`; edit the
 `scriptNN_*.sql` sources; test-first: a FAILING unit test to confirm the bug, then a PASSING one
 to verify the fix; run `mssql\UNIT_TESTS\autorun.bat`). That file lives in the separate
