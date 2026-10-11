@@ -29,7 +29,8 @@ public sealed class WorkerOptions
     /// <summary>Cron expression (6-field, seconds first) — default: top of every hour.</summary>
     public string Cron { get; set; } = "0 0 * * * *";
 
-    /// <summary>Pause inserted between (not after) stations within a pass.</summary>
+    /// <summary>Pause inserted between (not after) CA stations within a pass. US stations come from one
+    /// snapshot and never pause.</summary>
     public int PauseBetweenStationsMs { get; set; } = 1000;
 
     /// <summary>TCP connect-establishment timeout for the upstream feeds.</summary>
@@ -38,6 +39,12 @@ public sealed class WorkerOptions
     /// <summary>Response read timeout for the upstream feeds.</summary>
     public int ReadTimeoutMs { get; set; } = 30000;
 
+    /// <summary>
+    /// USGS Water Data API (OGC API) root. The API key is not an option: it is the <c>USGS_API_KEY</c>
+    /// secret, read from the environment / <c>.env</c> like the DB credentials.
+    /// </summary>
+    public string UsgsBaseUrl { get; set; } = "https://api.waterdata.usgs.gov/ogcapi/v1/collections";
+
     /// <summary>Honest, identifying User-Agent sent to the public government feeds.</summary>
-    public string UserAgent { get; set; } = "water-station-pusher/10.0.3 (+https://fishfind.info)";
+    public string UserAgent { get; set; } = "UofW-water service-USGC";
 }

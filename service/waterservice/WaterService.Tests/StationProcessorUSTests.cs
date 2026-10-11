@@ -1,81 +1,69 @@
-using System.Xml;
-using Microsoft.Extensions.Logging.Abstractions;
 using TUnit.Core;
 using WaterService.Domain;
 using WaterService.Processing;
+using WaterService.Sources;
 
 namespace WaterService.Tests;
 
 public class StationProcessorUSTests
 {
-    private static StationProcessorUS NewProcessor() =>
-        new(fetcher: null!, dataRepo: null!, log: NullLogger<StationProcessorUS>.Instance);
+    private static readonly TimeZoneInfo Mountain = UsgsWaterDataClient.ResolveTimeZone("MST", "Y");
+
+    private static UsgsObservation Obs(string code, string time, string value, string? statistic = "00011") =>
+        new(code, statistic, DateTimeOffset.Parse(time), value);
 
     [Test]
-    public async Task Parse_KeepsLatestSamplePerDay_AndNormalizesUnit()
+    public async Task BuildReadings_UsesLegacyNameAndUnit()
     {
-        // variableName uses the &#179; numeric entity for the cubed sign, like real USGS payloads.
-        string xml =
-            "<timeSeriesResponse xmlns=\"http://www.cuahsi.org/waterML/1.1/\">" +
-            "  <timeSeries>" +
-            "    <variable><variableName>Streamflow, ft&#179;/s</variableName></variable>" +
-            "    <values>" +
-            "      <value dateTime=\"2024-06-01T00:00:00.000-05:00\">100</value>" +
-            "      <value dateTime=\"2024-06-01T12:00:00.000-05:00\">150</value>" +
-            "      <value dateTime=\"2024-06-02T06:00:00.000-05:00\">200</value>" +
-            "    </values>" +
-            "  </timeSeries>" +
-            "</timeSeriesResponse>";
-
-        List<UsSeriesReading> series = NewProcessor().Parse(xml);
+        // sp_push_us_water_data keys its unit conversion on the exact legacy unit string ('ft^3/s').
+        List<UsSeriesReading> series = StationProcessorUS.BuildReadings(
+            [Obs("00060", "2026-10-11T18:00:00+00:00", "12.5")], Mountain);
 
         await Assert.That(series).HasCount().EqualTo(1);
-        UsSeriesReading reading = series[0];
-        await Assert.That(reading.Name).IsEqualTo("Streamflow");
-        await Assert.That(reading.Unit).IsEqualTo("ft^3/s");
-        await Assert.That(reading.XmlDoc)
-            .IsEqualTo("<root><a d=\"2024-06-01\" v=\"150\" /><a d=\"2024-06-02\" v=\"200\" /></root>");
+        await Assert.That(series[0].Name).IsEqualTo("Streamflow");
+        await Assert.That(series[0].Unit).IsEqualTo("ft^3/s");
+        await Assert.That(series[0].XmlDoc).IsEqualTo("<root><a d=\"2026-10-11\" v=\"12.5\" /></root>");
     }
 
     [Test]
-    public async Task Parse_BlankInput_ReturnsEmpty()
+    public async Task BuildReadings_DatesByTheStationsLocalDay()
     {
-        await Assert.That(NewProcessor().Parse("")).IsEmpty();
-        await Assert.That(NewProcessor().Parse("   ")).IsEmpty();
+        // 03:00 UTC on Oct 11 is still Oct 10 in New Mexico (MDT, UTC-6). Dating it by UTC would write a
+        // reading into tomorrow's row.
+        List<UsSeriesReading> series = StationProcessorUS.BuildReadings(
+            [Obs("00065", "2026-10-11T03:00:00+00:00", "3.34")], Mountain);
+
+        await Assert.That(series[0].XmlDoc).IsEqualTo("<root><a d=\"2026-10-10\" v=\"3.34\" /></root>");
     }
 
     [Test]
-    public async Task Parse_NonNumericValues_AreSkipped()
+    public async Task BuildReadings_DropsUnmappedNonInstantaneousAndNonNumeric()
     {
-        string xml =
-            "<timeSeriesResponse xmlns=\"http://www.cuahsi.org/waterML/1.1/\">" +
-            "  <timeSeries>" +
-            "    <variable><variableName>Gage height, ft</variableName></variable>" +
-            "    <values>" +
-            "      <value dateTime=\"2024-06-01T00:00:00.000-05:00\">-999999</value>" +
-            "      <value dateTime=\"2024-06-01T06:00:00.000-05:00\">Ice</value>" +
-            "    </values>" +
-            "  </timeSeries>" +
-            "</timeSeriesResponse>";
+        List<UsSeriesReading> series = StationProcessorUS.BuildReadings(
+            [
+                Obs("99999", "2026-10-11T18:00:00+00:00", "410"),          // not a legacy parameter
+                Obs("00060", "2026-10-11T18:00:00+00:00", "12", "00003"), // daily mean, not instantaneous
+                Obs("00065", "2026-10-11T18:00:00+00:00", "Ice"),
+                Obs("00010", "2026-10-11T18:00:00+00:00", "17.2", null),  // no statistic: kept
+            ],
+            Mountain);
 
-        List<UsSeriesReading> series = NewProcessor().Parse(xml);
         await Assert.That(series).HasCount().EqualTo(1);
-        UsSeriesReading reading = series[0];
-        await Assert.That(reading.Name).IsEqualTo("Gage height");
-        await Assert.That(reading.Unit).IsEqualTo("ft");
-        // "Ice" is non-numeric and dropped; the numeric -999999 is the latest valid sample for the day.
-        await Assert.That(reading.XmlDoc).IsEqualTo("<root><a d=\"2024-06-01\" v=\"-999999\" /></root>");
+        await Assert.That(series[0].Name).IsEqualTo("Temperature");
+        await Assert.That(series[0].Unit).IsEqualTo("water, &#176;C");
     }
 
     [Test]
-    public async Task Parse_RejectsDoctype_XxeHardened()
+    public async Task ResolveTimeZone_HonoursTheDaylightSavingFlag()
     {
-        string xml =
-            "<?xml version=\"1.0\"?>" +
-            "<!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]>" +
-            "<timeSeriesResponse><timeSeries></timeSeries></timeSeriesResponse>";
+        var july = new DateTimeOffset(2026, 7, 1, 12, 0, 0, TimeSpan.Zero);
 
-        await Assert.That(() => NewProcessor().Parse(xml))
-            .Throws<XmlException>();
+        await Assert.That(UsgsWaterDataClient.ResolveTimeZone("MST", "Y").GetUtcOffset(july))
+            .IsEqualTo(TimeSpan.FromHours(-6));
+        await Assert.That(UsgsWaterDataClient.ResolveTimeZone("MST", "N").GetUtcOffset(july)) // Arizona
+            .IsEqualTo(TimeSpan.FromHours(-7));
+        await Assert.That(UsgsWaterDataClient.ResolveTimeZone("HST", "N").GetUtcOffset(july))
+            .IsEqualTo(TimeSpan.FromHours(-10));
+        await Assert.That(UsgsWaterDataClient.ResolveTimeZone(null, null)).IsEqualTo(TimeZoneInfo.Utc);
     }
 }

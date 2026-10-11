@@ -14,6 +14,51 @@ _Nothing yet._
 
 ---
 
+## [10.2.0] — 2026-10-11
+
+**Deploy prerequisite:** `USGS_API_KEY` (encrypted, `enc:v1:`) in the droplet env file.
+
+### Changed
+
+- **User-Agent renamed to `UofW-water service-USGC`** (was `water-station-envfish/10.0.3` in
+  `appsettings.json`, `water-station-pusher/10.0.3 (+https://fishfind.info)` as the code default). It is
+  sent to both Environment Canada and USGS. The Java service keeps `water-station-pusher` and gets its
+  own USGS key later, so the two implementations can now be told apart in USGS's traffic.
+
+- **US data now comes from the USGS Water Data API, not the legacy WaterServices `nwis/iv` feed.** USGS
+  wrote to us on 2026-10-10 about traffic from the `water-station-pusher` user agent: WaterServices is
+  slowed from **2026-11-16**, has planned outages from **2027-01-27** and is switched off on
+  **2027-02-22**. We were calling it once per station, about 9,500 calls an hour from each of the two
+  redundant services. The new API (`api.waterdata.usgs.gov/ogcapi/v1`) is rate-limited per key
+  (1,000 requests/hour), so a per-station port was not an option.
+
+  Each US pass now pages the whole `latest-continuous` collection once (~2-3 requests of up to 50,000
+  rows) and each station is a lookup in that snapshot (`UsgsWaterDataClient` replaces `XmlFetcherUS`;
+  `StationProcessorUS.PrepareCycleAsync` is called by `StationWorker` before the US loop). The US pass no
+  longer pauses between stations, since there is no per-station request left to be polite about.
+
+  **Nothing changes in the database.** `UsgsParameterMap` maps each USGS parameter code to the exact
+  name/unit pair the WaterML parser used to send to `dbo.sp_push_us_water_data` (harvested from live legacy
+  responses), and readings are still dated by the station's **local** day: site time zones are looked up
+  once per process from `monitoring-locations`. Verified against the local DB on 2026-10-11: station
+  `08313000` stored the same converted discharge/elevation as before, and the snapshot covers 8,518 of our
+  US stations with data from the last 3 days against 8,514 delivered by the legacy feed.
+
+  Trade-off: `latest-continuous` holds only the newest value per series, so the 3-day backfill the
+  legacy `period=P3D` gave is gone. Hourly polling and the redundant Java service make a gap unlikely.
+
+### Added
+
+- **`USGS_API_KEY`** secret (environment / `.env`, `enc:v1:` supported), sent as `X-Api-Key`. Without it
+  the API's anonymous limit applies. **Deploy prerequisite:** add it to the droplet env file.
+- `Water:Worker:UsgsBaseUrl` (default `https://api.waterdata.usgs.gov/ogcapi/v1/collections`).
+
+### Removed
+
+- `XmlFetcherUS` and the WaterML parser (and their tests).
+
+---
+
 ## [10.1.1] — 2026-08-06
 
 Metric-correctness patch over `10.1.0`. No deployment changes — the master key mount introduced by `10.1.0`
