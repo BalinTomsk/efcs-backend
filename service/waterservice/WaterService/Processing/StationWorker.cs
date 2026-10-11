@@ -323,6 +323,13 @@ public sealed class StationWorker : BackgroundService
             country, stations.Count,
             string.IsNullOrWhiteSpace(requestedMli) ? "<all>" : requestedMli);
 
+        // US stations are read from one USGS snapshot per pass rather than one request per station.
+        if (country == "US")
+        {
+            await _processorUS.PrepareCycleAsync(stations.Select(s => s.Mli).ToList(), requestedMli, ct)
+                .ConfigureAwait(false);
+        }
+
         int succeeded = 0;
         int failed = 0;
         string? lastProcessedStation = null;
@@ -337,8 +344,9 @@ public sealed class StationWorker : BackgroundService
                 continue;
             }
 
-            // Pause BETWEEN stations only — sleeping after the final station just delays the cycle.
-            if (anyProcessed && _options.PauseBetweenStationsMs > 0)
+            // Pause BETWEEN stations only — sleeping after the final station just delays the cycle. US
+            // stations make no request of their own (they come from the snapshot), so they never pause.
+            if (anyProcessed && country != "US" && _options.PauseBetweenStationsMs > 0)
             {
                 try
                 {

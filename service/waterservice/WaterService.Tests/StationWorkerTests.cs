@@ -114,6 +114,37 @@ public class StationWorkerTests
         await Assert.That(stopwatch.ElapsedMilliseconds).IsLessThan(600);
     }
 
+    [Test]
+    public async Task RunOnce_UsPass_FetchesOneSnapshotAndNeverPauses()
+    {
+        // The US pass reads every station from one USGS snapshot, so the per-station pause (there to be
+        // polite to a per-station feed) would only stretch 9,500 lookups into hours.
+        var harness = new Harness(o => o.PauseBetweenStationsMs = 300);
+        harness.Stations["US"] = [new("A", "NY", -5), new("B", "NY", -5), new("C", "NY", -5)];
+
+        var stopwatch = Stopwatch.StartNew();
+        int processed = await harness.Worker.RunOnceAsync("US", null, CancellationToken.None);
+        stopwatch.Stop();
+
+        await Assert.That(processed).IsEqualTo(3);
+        await Assert.That(harness.ProcessorUS.Prepared).IsEqualTo(1);
+        await Assert.That(stopwatch.ElapsedMilliseconds).IsLessThan(250);
+    }
+
+    [Test]
+    public async Task RunCycle_FailedUsSnapshot_FailsOnlyTheUsPass()
+    {
+        var harness = new Harness();
+        harness.Stations["CA"] = [new("A", "QC", -5)];
+        harness.Stations["US"] = [new("08313000", "NM", -7)];
+        harness.ProcessorUS.PrepareFailure = new HttpRequestException("HTTP 429");
+
+        int processed = await harness.Worker.RunCycleAsync(null, CancellationToken.None);
+
+        await Assert.That(processed).IsEqualTo(1);
+        await Assert.That(harness.ProcessorUS.Seen).IsEmpty();
+    }
+
     // --- HTTP 503 backoff --------------------------------------------------------------------------
 
     [Test]
@@ -523,6 +554,16 @@ public class StationWorkerTests
         public override Task<ProcessingOutcome> ProcessWithOutcomeAsync(
             string mli, string state, int tz, CancellationToken ct) =>
             Task.FromResult(_recorder.Record(mli));
+
+        public int Prepared { get; private set; }
+
+        public Exception? PrepareFailure { get; set; }
+
+        public override Task PrepareCycleAsync(IReadOnlyCollection<string> mlis, string? requestedMli, CancellationToken ct)
+        {
+            Prepared++;
+            return PrepareFailure is null ? Task.CompletedTask : Task.FromException(PrepareFailure);
+        }
     }
 
     /// <summary>Shared recording state — the two passes run in parallel, so this is lock-guarded.</summary>

@@ -11,8 +11,8 @@ Once per hour (cron-driven) it:
 1. Loads supported stations from `vwWaterStation` (split by country `CA` / `US`).
 2. Downloads each **CA** station's hourly hydrometric CSV from Environment Canada, parses it, and upserts
    readings via `dbo.sp_UpdateWaterData` (water level → `elevation`, discharge → `discharge`).
-3. Downloads each **US** station's WaterML from USGS, reduces it to the latest sample per day per variable,
-   and saves it via `dbo.sp_push_us_water_data`.
+3. Fetches one snapshot of the latest US values from the USGS Water Data API per cycle (`USGS_API_KEY`), picks
+   out each **US** station, and saves it via `dbo.sp_push_us_water_data` under its legacy USGS names.
 4. When at least one station succeeded, runs `dbo.spPushSpeciesFromLakeToStation`.
 5. After every cycle, runs `dbo.sp_clean_old_water_data`.
 
@@ -23,7 +23,7 @@ Failures are logged and isolated per station — stations are never auto-disable
 - **.NET 10** (Worker + minimal ASP.NET Core host for `/health` and metrics)
 - **Microsoft.Data.SqlClient** — SQL Server access via the legacy stored procedures (no ORM)
 - **Polly** — retry + circuit breaker (Resilience4j equivalent)
-- **CsvHelper** — fault-tolerant CSV parsing; hardened `XmlReader` for WaterML (XXE-safe)
+- **CsvHelper** — fault-tolerant CSV parsing; `System.Text.Json` for the USGS Water Data API
 - **Cronos** — cron scheduling
 - **Serilog** — structured JSON logs, 7-day rolling file
 - **prometheus-net** — `/metrics`

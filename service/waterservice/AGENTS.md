@@ -2,7 +2,7 @@
 
 C# / .NET 10 port of the Java/Spring Boot `water-station-pusher` (`efj-backend/service/waterservice`). A
 cross-platform worker that pulls hydrometric data for **all** Canadian (Environment Canada CSV) and US
-(USGS WaterML) stations and upserts it into the FishFind SQL Server via the legacy stored procedures,
+(USGS Water Data API) stations and upserts it into the FishFind SQL Server via the legacy stored procedures,
 running in Docker on **Debian 13**.
 
 ## Dual-service redundancy (Java + C#) — do NOT retire either
@@ -102,7 +102,8 @@ to verify the fix; run `mssql\UNIT_TESTS\autorun.bat`). That file lives in the s
 
 - Poll supported Canadian and US water stations from MSSQL (`vwWaterStation`).
 - Download each **CA** station's hourly hydrometric CSV from Environment Canada.
-- Download each **US** station's WaterML payload from USGS.
+- Read each **US** station's latest values from one USGS Water Data API snapshot per cycle
+  (`latest-continuous`; key in `USGS_API_KEY`). The legacy WaterServices feed dies 2027-02-22.
 - Parse readings and upsert them into `dbo.WaterData`.
 - After each worker cycle, synchronously run stale-data cleanup:
   1. `dbo.sp_clean_old_water_data`
@@ -119,8 +120,8 @@ to verify the fix; run `mssql\UNIT_TESTS\autorun.bat`). That file lives in the s
 - **Stack:** Microsoft.Data.SqlClient (no ORM), Polly (retry + circuit breaker), CsvHelper, Cronos, Serilog
   (JSON, 7-day rolling file), prometheus-net. Host: Generic Host + minimal ASP.NET Core.
 - **Layout:** `Program.cs` (web mode + `--console` one-shot); `Processing/StationWorker.cs` (cron scheduler,
-  parallel CA/US passes, `RunOnStartup`); `Sources/` (CA CSV + US WaterML fetchers); `Processing/` (station
-  processors — US XML is XXE-hardened); `Data/` (repositories calling the same procs: `sp_UpdateWaterData`,
+  parallel CA/US passes, `RunOnStartup`); `Sources/` (CA CSV fetcher + USGS Water Data API client); `Processing/` (station
+  processors; `UsgsParameterMap` keeps the legacy USGS names the proc expects); `Data/` (repositories calling the same procs: `sp_UpdateWaterData`,
   `sp_push_us_water_data`, `sp_clean_old_water_data`, `spPushSpeciesFromLakeToStation`); `Configuration/`
   (options, `.env` loader, JDBC→SqlClient converter, Polly pipelines); `Web/` (`/health`, metrics, DB check).
 - **Endpoints:** `/health` on **8080** (public probe); metrics + liveness/readiness on **8081** (private,

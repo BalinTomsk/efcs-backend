@@ -49,7 +49,7 @@ public static class ServiceRegistration
         services.AddSingleton<WaterDataRepository>();
         services.AddSingleton<IStationHttp503BackoffRepository, StationHttp503BackoffRepository>();
         services.AddSingleton<CsvFetcherCA>();
-        services.AddSingleton<XmlFetcherUS>();
+        services.AddSingleton<UsgsWaterDataClient>();
         services.AddSingleton<StationProcessorCA>();
         services.AddSingleton<StationProcessorUS>();
         services.AddSingleton<StationPostProcessingService>();

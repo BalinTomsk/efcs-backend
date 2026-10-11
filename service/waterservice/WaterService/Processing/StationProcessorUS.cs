@@ -1,7 +1,5 @@
 using System.Globalization;
 using System.Text;
-using System.Xml;
-using System.Xml.Linq;
 using Microsoft.Extensions.Logging;
 using WaterService.Data;
 using WaterService.Domain;
@@ -10,32 +8,60 @@ using WaterService.Sources;
 namespace WaterService.Processing;
 
 /// <summary>
-/// Coordinates fetch, parse, save, and shared exception handling for one US station at a time.
+/// Coordinates save and shared exception handling for one US station at a time, reading from a
+/// per-cycle snapshot of the USGS Water Data API instead of calling USGS once per station.
+///
+/// <para>The worker calls <see cref="PrepareCycleAsync"/> once at the start of each US pass; each station
+/// is then a lookup in that snapshot. A station with no current series is skipped, as a 404 used to be.</para>
 /// </summary>
 public class StationProcessorUS : StationProcessorBase
 {
-    private readonly XmlFetcherUS _fetcher;
+    /// <summary>USGS statistic code for an instantaneous value — what the legacy <c>nwis/iv</c> feed served.</summary>
+    private const string InstantaneousStatistic = "00011";
+
+    private readonly UsgsWaterDataClient _client;
     private readonly WaterDataRepository _dataRepo;
     private readonly ILogger<StationProcessorUS> _log;
 
+    private IReadOnlyDictionary<string, List<UsgsObservation>>? _snapshot;
+
     public StationProcessorUS(
-        XmlFetcherUS fetcher,
+        UsgsWaterDataClient client,
         WaterDataRepository dataRepo,
         ILogger<StationProcessorUS> log)
     {
-        _fetcher = fetcher;
+        _client = client;
         _dataRepo = dataRepo;
         _log = log;
     }
 
     protected override ILogger Logger => _log;
     protected override string Country => "US";
-    protected override string MissingSourceDescription => "WaterML";
+    protected override string MissingSourceDescription => "USGS series";
+
+    /// <summary>
+    /// Loads this cycle's USGS snapshot and the time zones of the stations found in it. Throws when the
+    /// snapshot cannot be fetched, which fails the whole US pass.
+    /// </summary>
+    /// <param name="mlis">The supported US stations for this pass.</param>
+    /// <param name="requestedMli">A single requested station, or <c>null</c> for the full snapshot.</param>
+    public virtual async Task PrepareCycleAsync(IReadOnlyCollection<string> mlis, string? requestedMli, CancellationToken ct)
+    {
+        IReadOnlyDictionary<string, List<UsgsObservation>> snapshot =
+            await _client.FetchLatestAsync(requestedMli, ct).ConfigureAwait(false);
+        await _client.EnsureTimeZonesAsync(mlis.Where(snapshot.ContainsKey), ct).ConfigureAwait(false);
+        _snapshot = snapshot;
+    }
 
     protected override async Task ProcessStationAsync(string mli, string state, int tz, CancellationToken ct)
     {
-        string xml = await _fetcher.FetchAsync(state, mli, ct).ConfigureAwait(false);
-        List<UsSeriesReading> seriesList = Parse(xml);
+        if (_snapshot is null || !_snapshot.TryGetValue(mli, out List<UsgsObservation>? observations))
+        {
+            throw new FileNotFoundException(
+                $"No current USGS series for US station {mli} (state {state})");
+        }
+
+        List<UsSeriesReading> seriesList = BuildReadings(observations, _client.TimeZoneFor(mli));
 
         _log.LogDebug("Saving station readings. country={Country} station={Mli} state={State} series={Count}",
             Country, mli, state, seriesList.Count);
@@ -45,125 +71,40 @@ public class StationProcessorUS : StationProcessorBase
     }
 
     /// <summary>
-    /// Parses USGS WaterML into stored-procedure payloads, one payload per variable.
-    ///
-    /// <para><strong>Security (XXE):</strong> WaterML is untrusted input. The reader prohibits DOCTYPE
-    /// declarations and disables all external entity resolution, so a DOCTYPE/entity payload is rejected,
-    /// never expanded.</para>
+    /// Turns a station's latest USGS values into stored-procedure payloads, one per series, named and
+    /// united as the legacy WaterML feed named them (<see cref="UsgsParameterMap"/>) and dated by the
+    /// station's local day. Unmapped parameters, non-instantaneous statistics and non-numeric values are
+    /// dropped.
     /// </summary>
-    internal List<UsSeriesReading> Parse(string xml)
+    internal static List<UsSeriesReading> BuildReadings(IEnumerable<UsgsObservation> observations, TimeZoneInfo zone)
     {
-        if (string.IsNullOrWhiteSpace(xml))
-        {
-            return new List<UsSeriesReading>();
-        }
-
-        XDocument document = LoadSecure(xml);
         var results = new List<UsSeriesReading>();
-
-        XElement? root = document.Root;
-        if (root is null || root.Name.LocalName != "timeSeriesResponse")
+        foreach (UsgsObservation observation in observations)
         {
-            return results;
-        }
-
-        foreach (XElement timeSeries in root.Elements().Where(e => e.Name.LocalName == "timeSeries"))
-        {
-            string? fullName = timeSeries.Elements().FirstOrDefault(e => e.Name.LocalName == "variable")
-                ?.Elements().FirstOrDefault(e => e.Name.LocalName == "variableName")
-                ?.Value;
-            if (string.IsNullOrWhiteSpace(fullName))
+            if (observation.StatisticId is not null && observation.StatisticId != InstantaneousStatistic)
             {
                 continue;
             }
 
-            string[] pieces = fullName.Split(',', 2);
-            string name = pieces[0].Trim();
-            string? unit = pieces.Length > 1 ? NormalizeUnit(pieces[1].Trim()) : null;
-            string xmlDoc = BuildLegacyXml(timeSeries);
-
-            if (xmlDoc != "<root></root>")
+            UsgsParameterMap.LegacyName? legacy = UsgsParameterMap.Find(observation.ParameterCode);
+            string? value = NormalizeNumericValue(observation.Value);
+            if (legacy is null || value is null)
             {
-                results.Add(new UsSeriesReading(name, unit, xmlDoc));
+                continue;
             }
+
+            DateTime day = TimeZoneInfo.ConvertTime(observation.Time, zone).Date;
+            string xmlDoc = new StringBuilder("<root><a d=\"")
+                .Append(day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))
+                .Append("\" v=\"")
+                .Append(EscapeXml(value))
+                .Append("\" /></root>")
+                .ToString();
+            results.Add(new UsSeriesReading(legacy.Name, legacy.Unit, xmlDoc));
         }
 
         return results;
     }
-
-    private static XDocument LoadSecure(string xml)
-    {
-        var settings = new XmlReaderSettings
-        {
-            DtdProcessing = DtdProcessing.Prohibit, // reject any DOCTYPE (disallow-doctype-decl)
-            XmlResolver = null,                      // no external general/parameter entities, no external DTD
-            MaxCharactersFromEntities = 1024,
-        };
-
-        using var stringReader = new StringReader(xml);
-        using var xmlReader = XmlReader.Create(stringReader, settings);
-        return XDocument.Load(xmlReader);
-    }
-
-    private string BuildLegacyXml(XElement timeSeries)
-    {
-        IEnumerable<XElement> valueNodes = timeSeries.Elements()
-            .Where(e => e.Name.LocalName == "values")
-            .SelectMany(v => v.Elements().Where(e => e.Name.LocalName == "value"));
-
-        // USGS does not guarantee sample ordering, so keep the latest sample of each day by timestamp
-        // rather than whichever value happens to appear last in the document.
-        var samplesByDay = new Dictionary<DateTime, DailySample>();
-        foreach (XElement valueNode in valueNodes)
-        {
-            string? dateTimeAttr = valueNode.Attributes()
-                .FirstOrDefault(a => a.Name.LocalName == "dateTime")?.Value;
-            if (dateTimeAttr is null)
-            {
-                continue;
-            }
-
-            DateTimeOffset? stamp = ParseTimestamp(dateTimeAttr);
-            string? value = NormalizeNumericValue(valueNode.Value);
-            if (stamp is null || value is null)
-            {
-                continue;
-            }
-
-            DateTime day = stamp.Value.DateTime.Date;
-            if (!samplesByDay.TryGetValue(day, out DailySample existing) || stamp.Value > existing.Stamp)
-            {
-                samplesByDay[day] = new DailySample(stamp.Value, value);
-            }
-        }
-
-        var builder = new StringBuilder("<root>");
-        foreach (KeyValuePair<DateTime, DailySample> entry in samplesByDay)
-        {
-            builder.Append("<a d=\"")
-                .Append(entry.Key.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))
-                .Append("\" v=\"")
-                .Append(EscapeXml(entry.Value.Value))
-                .Append("\" />");
-        }
-        builder.Append("</root>");
-        return builder.ToString();
-    }
-
-    private readonly record struct DailySample(DateTimeOffset Stamp, string Value);
-
-    private static DateTimeOffset? ParseTimestamp(string text)
-    {
-        if (DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture,
-                DateTimeStyles.None, out DateTimeOffset parsed))
-        {
-            return parsed;
-        }
-        return null;
-    }
-
-    private static string NormalizeUnit(string unit) =>
-        unit.Replace("&#179;", "^3").Replace("³", "^3");
 
     private static string? NormalizeNumericValue(string? value)
     {
