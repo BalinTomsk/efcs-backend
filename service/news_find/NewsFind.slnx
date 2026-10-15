@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="NewsFind.Tests/NewsFind.Tests.csproj" />
+  <Project Path="NewsFind/NewsFind.csproj" />
+</Solution>
