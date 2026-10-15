@@ -1,4 +1,5 @@
 using System.Data;
+using System.Text;
 using Microsoft.Data.SqlClient;
 using Polly;
 using Polly.Registry;
@@ -14,6 +15,13 @@ namespace WaterService.Data;
 /// </summary>
 public sealed class WaterDataRepository
 {
+    /// <summary>
+    /// Readings per CA upsert batch. SQL Server caps one request at 2,100 parameters and each reading takes
+    /// three plus the shared <c>@mli</c>, so 500 (1,501 parameters) leaves headroom. A typical file is one
+    /// or two batches.
+    /// </summary>
+    internal const int MaxReadingsPerBatch = 500;
+
     private readonly ISqlConnectionFactory _connectionFactory;
     private readonly ResiliencePipeline _sql;
 
@@ -31,6 +39,9 @@ public sealed class WaterDataRepository
     /// <para>Readings are de-duplicated by timestamp (last one wins), then upserted through the legacy
     /// <c>dbo.sp_UpdateWaterData</c> — the CSV "Water Level" maps to the legacy <c>elevation</c> column
     /// and "Discharge" to <c>discharge</c>. The stored procedure itself owns the 15-day retention delete.</para>
+    ///
+    /// <para>The calls are sent as parameterised <c>EXEC</c> batches of up to <see cref="MaxReadingsPerBatch"/>
+    /// readings, so a station costs one or two round trips instead of one per reading.</para>
     /// </summary>
     public async Task SaveStationDataAsync(string mli, IReadOnlyList<Reading> readings, CancellationToken ct = default)
     {
@@ -55,27 +66,24 @@ public sealed class WaterDataRepository
             await using SqlTransaction transaction =
                 (SqlTransaction)await connection.BeginTransactionAsync(token).ConfigureAwait(false);
 
-            await using (var command = connection.CreateCommand())
+            // One round trip per chunk, not per reading: a CA file holds ~600 five-minute readings and the
+            // DB is ~75 ms away, so a per-row EXEC cost ~45 s per station (the Java twin batches too).
+            foreach (Reading[] chunk in unique.Chunk(MaxReadingsPerBatch))
             {
+                await using var command = connection.CreateCommand();
                 command.Transaction = transaction;
-                command.CommandType = CommandType.StoredProcedure;
-                command.CommandText = "dbo.sp_UpdateWaterData";
-
-                var pMli = command.Parameters.Add("@mli", SqlDbType.VarChar, 64);
-                var pStamp = command.Parameters.Add("@stamp", SqlDbType.DateTime2);
-                var pElevation = command.Parameters.Add("@elevation", SqlDbType.Float);
-                var pDischarge = command.Parameters.Add("@discharge", SqlDbType.Float);
-                await command.PrepareAsync(token).ConfigureAwait(false);
-
-                foreach (Reading reading in unique)
+                command.CommandType = CommandType.Text;
+                command.CommandText = BuildExecBatch("dbo.sp_UpdateWaterData", "@mli", chunk.Length, "@s", "@e", "@d");
+                command.Parameters.Add("@mli", SqlDbType.VarChar, 64).Value = mli;
+                for (int i = 0; i < chunk.Length; i++)
                 {
-                    pMli.Value = mli;
+                    Reading reading = chunk[i];
                     // The container runs in UTC, so store the UTC wall-clock (matches a UTC-timezone JVM).
-                    pStamp.Value = reading.Stamp.UtcDateTime;
-                    pElevation.Value = (object?)reading.WaterLevel ?? DBNull.Value;
-                    pDischarge.Value = (object?)reading.Discharge ?? DBNull.Value;
-                    await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                    command.Parameters.Add("@s" + i, SqlDbType.DateTime2).Value = reading.Stamp.UtcDateTime;
+                    command.Parameters.Add("@e" + i, SqlDbType.Float).Value = (object?)reading.WaterLevel ?? DBNull.Value;
+                    command.Parameters.Add("@d" + i, SqlDbType.Float).Value = (object?)reading.Discharge ?? DBNull.Value;
                 }
+                await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
             }
 
             await transaction.CommitAsync(token).ConfigureAwait(false);
@@ -84,7 +92,8 @@ public sealed class WaterDataRepository
 
     /// <summary>
     /// Saves USGS station series using the legacy <c>dbo.sp_push_us_water_data</c> stored procedure.
-    /// Empty variable payloads are ignored rather than failing the whole station save.
+    /// Empty variable payloads are ignored rather than failing the whole station save. All of a station's
+    /// series go in one parameterised <c>EXEC</c> batch.
     /// </summary>
     public async Task SaveUsStationDataAsync(
         string mli, string state, IReadOnlyList<UsSeriesReading> seriesList, CancellationToken ct = default)
@@ -102,30 +111,34 @@ public sealed class WaterDataRepository
             return;
         }
 
+        List<UsSeriesReading> series = seriesList
+            .Where(x => x is not null && !string.IsNullOrWhiteSpace(x.Name) && !string.IsNullOrWhiteSpace(x.XmlDoc))
+            .ToList();
+        if (series.Count == 0)
+        {
+            return;
+        }
+
         await _sql.ExecuteAsync(async token =>
         {
             await using SqlConnection connection = await _connectionFactory.OpenAsync(token).ConfigureAwait(false);
             await using SqlTransaction transaction =
                 (SqlTransaction)await connection.BeginTransactionAsync(token).ConfigureAwait(false);
 
-            foreach (UsSeriesReading series in seriesList)
+            // All of a station's series in one round trip (see SaveStationDataAsync).
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandType = CommandType.Text;
+            command.CommandText = BuildExecBatch("dbo.sp_push_us_water_data", "@mli, @state", series.Count, "@n", "@u", "@x");
+            command.Parameters.Add("@mli", SqlDbType.NVarChar, 128).Value = mli;
+            command.Parameters.Add("@state", SqlDbType.NVarChar, 128).Value = state;
+            for (int i = 0; i < series.Count; i++)
             {
-                if (series is null || string.IsNullOrWhiteSpace(series.Name) || string.IsNullOrWhiteSpace(series.XmlDoc))
-                {
-                    continue;
-                }
-
-                await using var command = connection.CreateCommand();
-                command.Transaction = transaction;
-                command.CommandType = CommandType.StoredProcedure;
-                command.CommandText = "dbo.sp_push_us_water_data";
-                command.Parameters.Add("@mli", SqlDbType.NVarChar, 128).Value = mli;
-                command.Parameters.Add("@state", SqlDbType.NVarChar, 128).Value = state;
-                command.Parameters.Add("@name", SqlDbType.NVarChar, 128).Value = series.Name;
-                command.Parameters.Add("@unit", SqlDbType.VarChar, 64).Value = (object?)series.Unit ?? DBNull.Value;
-                command.Parameters.Add("@xmldoc", SqlDbType.Xml).Value = series.XmlDoc;
-                await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                command.Parameters.Add("@n" + i, SqlDbType.NVarChar, 128).Value = series[i].Name;
+                command.Parameters.Add("@u" + i, SqlDbType.VarChar, 64).Value = (object?)series[i].Unit ?? DBNull.Value;
+                command.Parameters.Add("@x" + i, SqlDbType.Xml).Value = series[i].XmlDoc;
             }
+            await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
 
             await transaction.CommitAsync(token).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
@@ -151,6 +164,26 @@ public sealed class WaterDataRepository
             // sets or update counts (they are simply discarded), matching the Java result-set draining.
             await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Builds a parameterised batch of <paramref name="count"/> <c>EXEC</c> calls of one procedure, so a whole
+    /// station is written in one round trip. Call <c>i</c> passes the shared parameters followed by
+    /// <c>{prefix}{i}</c> for each per-call prefix, e.g. <c>EXEC dbo.p @mli, @s0, @e0, @d0;</c>.
+    /// </summary>
+    internal static string BuildExecBatch(string procedure, string sharedParameters, int count, params string[] prefixes)
+    {
+        var sql = new StringBuilder(count * (procedure.Length + sharedParameters.Length + 32));
+        for (int i = 0; i < count; i++)
+        {
+            sql.Append("EXEC ").Append(procedure).Append(' ').Append(sharedParameters);
+            foreach (string prefix in prefixes)
+            {
+                sql.Append(", ").Append(prefix).Append(i);
+            }
+            sql.Append(";\n");
+        }
+        return sql.ToString();
     }
 
     /// <summary>

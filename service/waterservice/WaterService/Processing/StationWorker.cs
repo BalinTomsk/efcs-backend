@@ -12,10 +12,12 @@ namespace WaterService.Processing;
 /// <summary>
 /// Schedules and runs the recurring station-processing cycle.
 ///
-/// <para>In normal mode an hourly cycle is registered from a cron expression. Each cycle processes the CA
-/// and US stations in parallel and then runs post-processing <strong>exactly once</strong> — and only when
-/// at least one station was processed successfully. The single-loop design means a cycle that overruns its
-/// hour simply delays the next one instead of overlapping.</para>
+/// <para>In normal mode the CA and US passes each run on their <strong>own</strong> schedule of the same cron
+/// expression, so a slow CA pass (one request per station) cannot hold back the US refresh. Each scheduled
+/// pass is followed by post-processing — species push only when at least one station succeeded, cleanup
+/// always — serialised between the two countries. A pass that overruns its period delays only its own next
+/// run instead of overlapping. Startup runs (<see cref="RunCycleAsync"/>) still process both countries
+/// together and post-process exactly once.</para>
 /// </summary>
 public sealed class StationWorker : BackgroundService
 {
@@ -33,6 +35,9 @@ public sealed class StationWorker : BackgroundService
     private readonly WorkerOptions _options;
     private readonly ILogger<StationWorker> _log;
     private readonly CronExpression _cron;
+
+    // The CA and US schedules each post-process after their pass; never let the two run the procs at once.
+    private readonly SemaphoreSlim _postProcessingGate = new(1, 1);
 
     public StationWorker(
         WaterStationRepository repo,
@@ -141,13 +146,29 @@ public sealed class StationWorker : BackgroundService
             }
         }
 
+        // Independent schedules: before this the single loop awaited both passes, so a ~28 h CA pass meant the
+        // ~1 h US pass also refreshed only once per ~28 h.
+        await Task.WhenAll(
+            RunScheduleAsync("CA", stoppingToken),
+            RunScheduleAsync("US", stoppingToken)).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// One country's scheduler loop: wait for the next cron fire, run that country's cycle, record the
+    /// outcome. A cycle that overruns delays only this country's next run.
+    /// </summary>
+    private async Task RunScheduleAsync(string country, CancellationToken stoppingToken)
+    {
+        // Yield so the two schedules start independently rather than the first running on the caller.
+        await Task.Yield();
         while (!stoppingToken.IsCancellationRequested)
         {
             DateTime nowUtc = DateTime.UtcNow;
             DateTime? next = _cron.GetNextOccurrence(nowUtc);
             if (next is null)
             {
-                _log.LogWarning("Cron expression never fires again; stopping scheduler. cron=\"{Cron}\"", _options.Cron);
+                _log.LogWarning("Cron expression never fires again; stopping scheduler. country={Country} cron=\"{Cron}\"",
+                    country, _options.Cron);
                 return;
             }
 
@@ -167,7 +188,7 @@ public sealed class StationWorker : BackgroundService
             DateTime startUtc = DateTime.UtcNow;
             try
             {
-                await RunCycleAsync(null, stoppingToken).ConfigureAwait(false);
+                await RunCountryCycleAsync(country, stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -175,11 +196,11 @@ public sealed class StationWorker : BackgroundService
             }
             catch (Exception ex)
             {
-                _log.LogError(ex, "Station cycle failed.");
+                _log.LogError(ex, "Station cycle failed. country={Country}", country);
             }
             finally
             {
-                RecordCycleOutcome(startUtc, DateTime.UtcNow);
+                RecordCycleOutcome(startUtc, DateTime.UtcNow, country);
             }
         }
     }
@@ -188,7 +209,8 @@ public sealed class StationWorker : BackgroundService
     /// Makes a cycle that overran its cron period observable: the scheduler silently skips the next trigger
     /// in that case, so without this a slowly degrading cycle time produces data gaps with no signal.
     /// </summary>
-    internal void RecordCycleOutcome(DateTime startUtc, DateTime endUtc)
+    /// <param name="country">The country whose scheduled cycle this was; <c>null</c> for a both-country startup cycle.</param>
+    internal void RecordCycleOutcome(DateTime startUtc, DateTime endUtc, string? country = null)
     {
         long durationSeconds = (long)(endUtc - startUtc).TotalSeconds;
         DateTime? nextFire = _cron.GetNextOccurrence(startUtc);
@@ -197,11 +219,13 @@ public sealed class StationWorker : BackgroundService
             _metrics.CycleOverrun();
             _log.LogWarning(
                 "Station cycle overran its cron period; the next scheduled cycle was skipped. "
-                + "durationSeconds={Duration} cron=\"{Cron}\"", durationSeconds, _options.Cron);
+                + "country={Country} durationSeconds={Duration} cron=\"{Cron}\"",
+                LogValue(country, "<all>"), durationSeconds, _options.Cron);
         }
         else
         {
-            _log.LogInformation("Station cycle duration. durationSeconds={Duration}", durationSeconds);
+            _log.LogInformation("Station cycle duration. country={Country} durationSeconds={Duration}",
+                LogValue(country, "<all>"), durationSeconds);
         }
     }
 
@@ -224,6 +248,68 @@ public sealed class StationWorker : BackgroundService
         int failed = caStats.Failed + usStats.Failed;
 
         using (LogContext.PushProperty(CorrelationIdProperty, correlationId))
+        {
+            Exception? postProcessingFailure = await PostProcessAsync(succeeded, ct).ConfigureAwait(false);
+
+            _log.LogInformation(
+                "Station cycle completed. successfulStations={Succeeded} failedStations={Failed} "
+                + "caLastProcessedStation={CaProcessed} usLastProcessedStation={UsProcessed} "
+                + "caLastFailedStation={CaFailed} usLastFailedStation={UsFailed}",
+                succeeded, failed,
+                LogValue(caStats.LastProcessedStation), LogValue(usStats.LastProcessedStation),
+                LogValue(caStats.LastFailedStation), LogValue(usStats.LastFailedStation));
+
+            if (postProcessingFailure is not null)
+            {
+                throw postProcessingFailure;
+            }
+        }
+
+        return succeeded;
+    }
+
+    /// <summary>
+    /// Runs one country's scheduled cycle: its pass, then post-processing (species push only when at least
+    /// one station succeeded; cleanup always).
+    /// </summary>
+    /// <returns>The number of stations processed successfully.</returns>
+    public async Task<int> RunCountryCycleAsync(string country, CancellationToken ct)
+    {
+        string correlationId = Guid.NewGuid().ToString("N").Substring(0, 8);
+        PassStats stats = await AwaitPassAsync(RunPassAsync(country, null, correlationId, ct), country)
+            .ConfigureAwait(false);
+
+        using (LogContext.PushProperty(CorrelationIdProperty, correlationId))
+        {
+            Exception? postProcessingFailure = await PostProcessAsync(stats.Succeeded, ct).ConfigureAwait(false);
+
+            _log.LogInformation(
+                "Station cycle completed. country={Country} successfulStations={Succeeded} failedStations={Failed} "
+                + "lastProcessedStation={Processed} lastFailedStation={Failed2}",
+                country, stats.Succeeded, stats.Failed,
+                LogValue(stats.LastProcessedStation), LogValue(stats.LastFailedStation));
+
+            if (postProcessingFailure is not null)
+            {
+                throw postProcessingFailure;
+            }
+        }
+
+        return stats.Succeeded;
+    }
+
+    /// <summary>
+    /// Runs species post-processing (only when <paramref name="succeeded"/> &gt; 0) and then old-data cleanup,
+    /// one caller at a time. A species-push failure never blocks cleanup.
+    /// </summary>
+    /// <returns>
+    /// The failure for the caller to rethrow after its summary log (both combined if both steps failed), or
+    /// <c>null</c>.
+    /// </returns>
+    private async Task<Exception?> PostProcessAsync(int succeeded, CancellationToken ct)
+    {
+        await _postProcessingGate.WaitAsync(ct).ConfigureAwait(false);
+        try
         {
             Exception? postProcessingFailure = null;
             try
@@ -261,21 +347,12 @@ public sealed class StationWorker : BackgroundService
                 }
             }
 
-            _log.LogInformation(
-                "Station cycle completed. successfulStations={Succeeded} failedStations={Failed} "
-                + "caLastProcessedStation={CaProcessed} usLastProcessedStation={UsProcessed} "
-                + "caLastFailedStation={CaFailed} usLastFailedStation={UsFailed}",
-                succeeded, failed,
-                LogValue(caStats.LastProcessedStation), LogValue(usStats.LastProcessedStation),
-                LogValue(caStats.LastFailedStation), LogValue(usStats.LastFailedStation));
-
-            if (postProcessingFailure is not null)
-            {
-                throw postProcessingFailure;
-            }
+            return postProcessingFailure;
         }
-
-        return succeeded;
+        finally
+        {
+            _postProcessingGate.Release();
+        }
     }
 
     private async Task<PassStats> RunPassAsync(string country, string? requestedMli, string correlationId, CancellationToken ct)
@@ -424,7 +501,7 @@ public sealed class StationWorker : BackgroundService
             _ => throw new ArgumentException("Unsupported country " + country, nameof(country)),
         };
 
-    private static string LogValue(string? value) => value ?? "<none>";
+    private static string LogValue(string? value, string missing = "<none>") => value ?? missing;
 
     private readonly record struct PassStats(
         string Country,
