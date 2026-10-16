@@ -1,0 +1,23 @@
+# .NET build output
+bin/
+obj/
+publish/
+*.user
+
+# Local runtime logs
+logs/
+
+# Secrets / local env (never commit)
+.env
+secret/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+
+# Embedding model files (~130 MB) -- fetched by scripts/fetch-model.ps1
+models/
+
+# Deploy runbook with host details -- never in the public repo
+docs/do-update.md
