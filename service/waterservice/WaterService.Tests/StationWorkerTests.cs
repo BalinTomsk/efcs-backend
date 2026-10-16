@@ -291,6 +291,40 @@ public class StationWorkerTests
             .IsEquivalentTo(new[] { "species push failed", "cleanup failed" });
     }
 
+    // --- per-country scheduled cycles ---------------------------------------------------------------
+
+    [Test]
+    public async Task RunCountryCycle_ProcessesOnlyThatCountry_AndPostProcesses()
+    {
+        var harness = new Harness();
+        harness.Stations["CA"] = [new("02JE025", "QC", -5)];
+        harness.Stations["US"] = [new("08313000", "NY", -5)];
+
+        int processed = await harness.Worker.RunCountryCycleAsync("US", CancellationToken.None);
+
+        await Assert.That(processed).IsEqualTo(1);
+        await Assert.That(harness.ProcessorCA.Seen).IsEmpty();
+        await Assert.That(harness.ProcessorUS.Seen).IsEquivalentTo(new[] { "08313000" });
+        await Assert.That(harness.PostProcessing.SpeciesRuns).IsEqualTo(1);
+        await Assert.That(harness.PostProcessing.CleanupRuns).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task SlowCaPass_DoesNotHoldBackTheUsSchedule()
+    {
+        // The bug this pins: one loop awaited both passes, so a ~28 h CA pass meant US data refreshed
+        // once per ~28 h. With a CA pass that never finishes, the US schedule must keep firing.
+        var harness = new Harness(o => o.Cron = "* * * * * *");
+        harness.Stations["CA"] = [new("02JE025", "QC", -5)];
+        harness.Stations["US"] = [new("08313000", "NY", -5)];
+        harness.ProcessorCA.Gate = ct => Task.Delay(Timeout.Infinite, ct);
+
+        await RunHostedAsync(harness.Worker, TimeSpan.FromMilliseconds(3500));
+
+        await Assert.That(harness.ProcessorCA.Seen.Count).IsEqualTo(1);
+        await Assert.That(harness.ProcessorUS.Seen.Count).IsGreaterThanOrEqualTo(2);
+    }
+
     // --- cycle overrun visibility ------------------------------------------------------------------
 
     [Test]
@@ -536,9 +570,19 @@ public class StationWorkerTests
 
         public IReadOnlyList<string> Seen => _recorder.Seen;
 
-        public override Task<ProcessingOutcome> ProcessWithOutcomeAsync(
-            string mli, string state, int tz, CancellationToken ct) =>
-            Task.FromResult(_recorder.Record(mli));
+        /// <summary>Optional wait before each station completes, to simulate a slow feed.</summary>
+        public Func<CancellationToken, Task>? Gate { get; set; }
+
+        public override async Task<ProcessingOutcome> ProcessWithOutcomeAsync(
+            string mli, string state, int tz, CancellationToken ct)
+        {
+            ProcessingOutcome outcome = _recorder.Record(mli);
+            if (Gate is not null)
+            {
+                await Gate(ct);
+            }
+            return outcome;
+        }
     }
 
     private sealed class FakeProcessorUS : StationProcessorUS

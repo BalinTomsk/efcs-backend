@@ -14,6 +14,35 @@ _Nothing yet._
 
 ---
 
+## [10.3.0] — 2026-10-15
+
+### Fixed
+
+- **The "hourly" cycle took ~28 hours** (`Station cycle duration` 100,895-108,236 s on 10.1.1), so CA data
+  refreshed about once a day and, because the single scheduler loop awaited both passes, so did US data
+  even after 10.2.0 cut the US pass to ~70 min. Measured on the droplet on 2026-10-11: ~70 CA stations an
+  hour (~51 s each) with almost no failures, skips or breaker trips; the Environment Canada CSV downloads
+  in ~0.13 s. The time went to the database: each CA file carries ~600 five-minute readings and
+  `SaveStationDataAsync` sent one `EXEC dbo.sp_UpdateWaterData` per reading to a server ~75 ms away
+  (600 x 75 ms = 45 s) plus the 5 s pause. The Java twin already batched this write, which is why its CA
+  pass takes ~70 min.
+  - CA readings are now written as parameterised `EXEC` batches of up to 500 per command (one or two round
+    trips per station). US series likewise go in one batch per station. No database change; validated
+    against a real SQL Server (insert, update, NULLs, two chunks, rollback on a failing call).
+  - The CA and US passes now run on **independent schedules** of the same cron, so a slow pass delays only
+    its own next run. Each scheduled pass post-processes after itself (serialised; the procs are
+    idempotent). Startup runs and console mode still run both countries together and post-process once.
+  - `Station cycle duration` / `Station cycle overran` and the scheduled `Station cycle completed` lines now
+    carry `country`; all stay at `Information` (overrun at `Warning`) per the log-level policy.
+
+### Changed
+
+- **`PauseBetweenStationsMs` back to 1000 ms** in `appsettings.json` (5000 since 10.0.3, with no recorded
+  reason; the code default and the Java service use 1000). The datamart serves static files, and at 5 s
+  the pause alone added ~3 h to a 2,219-station pass.
+
+---
+
 ## [10.2.0] — 2026-10-11
 
 **Deploy prerequisite:** `USGS_API_KEY` (encrypted, `enc:v1:`) in the droplet env file.
