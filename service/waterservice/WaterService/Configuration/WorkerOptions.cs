@@ -22,7 +22,7 @@ public sealed class WorkerOptions
     /// When set, runs a startup verification that processes only the specified station(s) on startup
     /// before scheduling begins. Useful for deployment verification to ensure the service can process
     /// at least one station successfully without running a full cycle. Comma-separated list of MLIs.
-    /// Example: "02HA014" or "02HA014,USGS-01646500". Takes precedence over <c>RunOnStartup</c>.
+    /// Example: "05BH004" or "05BH004,USGS-01646500". Takes precedence over <c>RunOnStartup</c>.
     /// </summary>
     public string? StartupVerificationStations { get; set; } = null;
 
