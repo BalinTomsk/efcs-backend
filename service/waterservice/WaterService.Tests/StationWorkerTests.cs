@@ -350,6 +350,30 @@ public class StationWorkerTests
         await Assert.That(harness.Metrics.Overruns).IsEqualTo(0);
     }
 
+    [Test]
+    public async Task CycleThatStartedAFewMsBeforeItsFire_IsNotAnOverrun()
+    {
+        // Task.Delay woke at 19:59:59.998 for the 20:00 fire; a 46-minute cycle must not count as an overrun.
+        var harness = new Harness();
+        var fire = new DateTime(2026, 10, 15, 20, 0, 0, DateTimeKind.Utc);
+        DateTime start = fire.AddMilliseconds(-2);
+
+        harness.Worker.RecordCycleOutcome(start, fire.AddMinutes(46), "US", fire);
+
+        await Assert.That(harness.Metrics.Overruns).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task EarlyStartedCycle_StillCountsARealOverrun()
+    {
+        var harness = new Harness();
+        var fire = new DateTime(2026, 10, 15, 20, 0, 0, DateTimeKind.Utc);
+
+        harness.Worker.RecordCycleOutcome(fire.AddMilliseconds(-2), fire.AddMinutes(70), "CA", fire);
+
+        await Assert.That(harness.Metrics.Overruns).IsEqualTo(1);
+    }
+
     // --- scheduling ---------------------------------------------------------------------------------
 
     [Test]

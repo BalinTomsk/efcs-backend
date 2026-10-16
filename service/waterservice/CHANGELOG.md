@@ -14,6 +14,24 @@ _Nothing yet._
 
 ---
 
+## [10.3.1] — 2026-10-16
+
+### Fixed
+
+- **False "cycle overran" warnings.** After 10.3.0, US cycles of ~2,700 s (20:46 and 23:44 UTC on
+  2026-10-15) were logged as overruns and counted on `water_cycle_overrun_total`. `Task.Delay` sometimes
+  wakes a few ms before the cron fire, so the cycle "started" at 19:59:59.99x and its own 20:00 fire was taken
+  as the next one. The check now measures from the fire the loop waited for. The loop also computes the
+  next fire from the later of now and the last fire, so a cycle shorter than that early wake can no longer
+  run twice for the same fire.
+
+### Changed
+
+- **`PauseBetweenStationsMs` 1000 -> 500** in `appsettings.json`. At 1000 the CA pass took 66–72 min
+  (3,981–4,351 s measured 2026-10-15), so it overran the hour and refreshed only every 2 h. The pause is
+  ~37 min of that; 500 ms takes off ~18 min, bringing the pass back under the hour. The datamart serves
+  static files.
+
 ## [10.3.0] — 2026-10-15
 
 ### Fixed

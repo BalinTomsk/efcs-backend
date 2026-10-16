@@ -161,10 +161,14 @@ public sealed class StationWorker : BackgroundService
     {
         // Yield so the two schedules start independently rather than the first running on the caller.
         await Task.Yield();
+        DateTime? lastFireUtc = null;
         while (!stoppingToken.IsCancellationRequested)
         {
+            // Task.Delay can wake a few ms before the fire time. Never compute the next fire from a clock that
+            // is still before the last one, or a short cycle would run twice for the same fire.
             DateTime nowUtc = DateTime.UtcNow;
-            DateTime? next = _cron.GetNextOccurrence(nowUtc);
+            DateTime from = lastFireUtc is { } last && last > nowUtc ? last : nowUtc;
+            DateTime? next = _cron.GetNextOccurrence(from);
             if (next is null)
             {
                 _log.LogWarning("Cron expression never fires again; stopping scheduler. country={Country} cron=\"{Cron}\"",
@@ -185,6 +189,7 @@ public sealed class StationWorker : BackgroundService
                 }
             }
 
+            lastFireUtc = next.Value;
             DateTime startUtc = DateTime.UtcNow;
             try
             {
@@ -200,7 +205,7 @@ public sealed class StationWorker : BackgroundService
             }
             finally
             {
-                RecordCycleOutcome(startUtc, DateTime.UtcNow, country);
+                RecordCycleOutcome(startUtc, DateTime.UtcNow, country, lastFireUtc);
             }
         }
     }
@@ -210,10 +215,15 @@ public sealed class StationWorker : BackgroundService
     /// in that case, so without this a slowly degrading cycle time produces data gaps with no signal.
     /// </summary>
     /// <param name="country">The country whose scheduled cycle this was; <c>null</c> for a both-country startup cycle.</param>
-    internal void RecordCycleOutcome(DateTime startUtc, DateTime endUtc, string? country = null)
+    /// <param name="scheduledUtc">
+    /// The cron fire this cycle ran for. The overrun check measures from it, not from <paramref name="startUtc"/>:
+    /// a delay that woke a few ms early made the cycle's own fire look like the next one, so every cycle that
+    /// started early was logged as an overrun.
+    /// </param>
+    internal void RecordCycleOutcome(DateTime startUtc, DateTime endUtc, string? country = null, DateTime? scheduledUtc = null)
     {
         long durationSeconds = (long)(endUtc - startUtc).TotalSeconds;
-        DateTime? nextFire = _cron.GetNextOccurrence(startUtc);
+        DateTime? nextFire = _cron.GetNextOccurrence(scheduledUtc ?? startUtc);
         if (nextFire is not null && endUtc >= nextFire.Value)
         {
             _metrics.CycleOverrun();
