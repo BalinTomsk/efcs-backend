@@ -2,8 +2,8 @@ namespace NewsSearch.Sources;
 
 /// <summary>
 /// One way of finding news. Each source is its own endpoint (<c>GET /api/v1/newssearch/{name}</c>) so the
-/// page can ask all of them in parallel and show each result set as it arrives. Today: <c>vector</c>.
-/// Planned: <c>bm25</c>, <c>image</c>. The SQL keyword search is not here on purpose: it stays on docapi
+/// page can ask all of them in parallel and show each result set as it arrives. Today: <c>vector</c> and
+/// <c>bm25</c>. Planned: <c>image</c>. The SQL keyword search is not here on purpose: it stays on docapi
 /// (jnode), so either node can fail without taking the other's results down.
 /// </summary>
 public interface ISearchSource
@@ -23,7 +23,7 @@ public sealed record SearchRequest(string Query, int Limit, string? Country);
 
 /// <summary>
 /// One article, in the shape every source returns, so the page can merge them. <c>Score</c> is the source's
-/// own relevance (cosine for vector), comparable only within one source.
+/// own relevance (cosine for vector, BM25 for bm25), comparable only within one source.
 /// </summary>
 public sealed record SearchHit(
     string NewsId, string Title, string? Source, string? Country, string? Date, double Score, string? Snippet, string? LakeId);

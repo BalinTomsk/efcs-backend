@@ -1,7 +1,8 @@
 # news_idx (C# / .NET 10) — Agent Context
 
-Semantic search over FishFind news: RabbitMQ event → read the article from MySQL `news` → embed with
-**bge-small-en-v1.5** (ONNX, in-process) → **Qdrant**. Serves `GET /api/v1/newsidx/search`. Built like
+Semantic and keyword search over FishFind news: RabbitMQ event → read the article from MySQL `news` → embed
+with **bge-small-en-v1.5** (ONNX, in-process) → **Qdrant** (`news_articles`), and BM25 terms → **Qdrant**
+(`news_articles_bm25`). Serves `GET /api/v1/newsidx/search` (vector) and `GET /api/v1/newsidx/bm25`. Built like
 `../waterapi` (same host skeleton, envelope, port split, secrets, logging, Docker base).
 
 **Source of truth:** `docs/specification.md`. Session log: `docs/memory.md`. History: `CHANGELOG.md`.
@@ -25,7 +26,9 @@ Semantic search over FishFind news: RabbitMQ event → read the article from MyS
   droplets are small and shared.
 - Routes stay under **`/api/v1/newsidx/`** — cproxy sends `/api/v1/news/*` to docapi.
 - `/admin/*` is management-port only (8081), like `/metrics`. Never publish 8081.
-- Changing the model or chunking requires `POST /admin/sync?full=true` (timestamps cannot see it).
+- Changing the model, chunking, BM25 analyzer or BM25 parameters requires `POST /admin/sync?full=true`
+  (timestamps cannot see it).
+- The two collections move together: every index/remove path writes both (`NewsIndexer`).
 - Model files stay out of git (`models/`, fetched by `scripts/fetch-model.ps1`).
 
 ## Build & test

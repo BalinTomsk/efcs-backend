@@ -135,6 +135,63 @@ internal sealed class FakeVectorStore : IVectorStore
     private static DateTime Seconds(DateTime t) => DateTimeOffset.FromUnixTimeSeconds(new DateTimeOffset(t).ToUnixTimeSeconds()).UtcDateTime;
 }
 
+/// <summary>
+/// In-memory BM25 store: computes Qdrant's IDF (<c>ln(1 + (N − n + 0.5)/(n + 0.5))</c>) over the stored
+/// documents at query time, exactly like the <c>modifier = idf</c> collection.
+/// </summary>
+internal sealed class FakeKeywordStore : IKeywordStore
+{
+    public ConcurrentDictionary<string, (NewsArticle Article, string Text, SparseTerms Terms)> Docs { get; } = new();
+    public bool Ensured;
+
+    public Task EnsureCollectionAsync(CancellationToken cancellationToken)
+    {
+        Ensured = true;
+        return Task.CompletedTask;
+    }
+
+    public Task<ulong> CountAsync(CancellationToken cancellationToken) => Task.FromResult((ulong)Docs.Count);
+
+    public Task ReplaceArticleAsync(NewsArticle article, string text, SparseTerms terms, CancellationToken cancellationToken)
+    {
+        Docs[NewsIds.Normalize(article.NewsId)] = (article, text, terms);
+        return Task.CompletedTask;
+    }
+
+    public Task DeleteArticleAsync(string newsId, CancellationToken cancellationToken)
+    {
+        Docs.TryRemove(NewsIds.Normalize(newsId), out _);
+        return Task.CompletedTask;
+    }
+
+    public Task<IReadOnlyDictionary<string, DateTime>> ListIndexedVersionsAsync(CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyDictionary<string, DateTime>>(Docs.ToDictionary(d => d.Key,
+            d => DateTimeOffset.FromUnixTimeSeconds(new DateTimeOffset(d.Value.Article.LastEditUtc).ToUnixTimeSeconds()).UtcDateTime));
+
+    public Task<IReadOnlyList<KeywordHit>> SearchAsync(SparseTerms query, int limit, string? country, CancellationToken cancellationToken)
+    {
+        int n = Docs.Count;
+        var hits = new List<KeywordHit>();
+        foreach (var d in Docs.Values.Where(d => country is null || d.Article.Country == country))
+        {
+            float score = 0;
+            foreach (uint term in query.Indices)
+            {
+                int at = Array.IndexOf(d.Terms.Indices, term);
+                if (at < 0) continue;
+                int df = Docs.Values.Count(o => o.Terms.Indices.Contains(term));
+                score += (float)Math.Log(1 + (n - df + 0.5) / (df + 0.5)) * d.Terms.Values[at];
+            }
+            if (score > 0)
+            {
+                hits.Add(new KeywordHit(d.Article.NewsId, score, d.Article.Title, d.Article.Source, d.Article.Country,
+                    d.Article.StampUtc, d.Article.LakeId, d.Text));
+            }
+        }
+        return Task.FromResult<IReadOnlyList<KeywordHit>>(hits.OrderByDescending(h => h.Score).Take(limit).ToList());
+    }
+}
+
 /// <summary>Queue fake: messages to hand out, plus everything published back.</summary>
 internal sealed class FakeQueue : IMessageQueue
 {
@@ -170,12 +227,19 @@ internal static class TestSupport
         new ServiceCollection().AddLogging().AddNewsIdxResiliencePipelines().BuildServiceProvider()
             .GetRequiredService<ResiliencePipelineProvider<string>>();
 
-    public static NewsIndexer Indexer(FakeArticleSource source, FakeVectorStore store, FakeEmbedder? embedder = null, NewsIdxOptions? options = null) =>
-        new(source, embedder ?? new FakeEmbedder(), store, Pipelines(),
+    public static NewsIndexer Indexer(
+        FakeArticleSource source, FakeVectorStore store, FakeEmbedder? embedder = null, NewsIdxOptions? options = null,
+        FakeKeywordStore? keywords = null) =>
+        new(source, embedder ?? new FakeEmbedder(), store, keywords ?? new FakeKeywordStore(), Pipelines(),
             Microsoft.Extensions.Options.Options.Create(options ?? Options()), NullLogger<NewsIndexer>.Instance);
 
-    public static NewsSyncService Sync(FakeArticleSource source, FakeVectorStore store, NewsIndexer? indexer = null) =>
-        new(source, store, indexer ?? Indexer(source, store), Pipelines(), TimeProvider.System, NullLogger<NewsSyncService>.Instance);
+    public static NewsSyncService Sync(
+        FakeArticleSource source, FakeVectorStore store, NewsIndexer? indexer = null, FakeKeywordStore? keywords = null)
+    {
+        keywords ??= new FakeKeywordStore();
+        return new(source, store, keywords, indexer ?? Indexer(source, store, keywords: keywords), Pipelines(),
+            TimeProvider.System, NullLogger<NewsSyncService>.Instance);
+    }
 
     public static string Event(string newsId, string action = "updated", int? attempt = null)
     {

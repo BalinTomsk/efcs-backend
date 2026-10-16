@@ -24,7 +24,7 @@ public class SearchTests
         source.Add("Bass tournament", "largemouth bass tournament results on the lake", country: "US");
         source.Add("Trout stocking", "rainbow trout stocking program spring");
         await TestSupport.Sync(source, store).RunAsync(full: true, CancellationToken.None);
-        var service = new NewsSearchService(new FakeEmbedder(), store, Options.Create(TestSupport.Options()));
+        var service = new NewsSearchService(new FakeEmbedder(), store, new FakeKeywordStore(), Options.Create(TestSupport.Options()));
         return (service, source);
     }
 
@@ -74,6 +74,7 @@ public class SearchTests
     }
 
     [Test]
+    [NotInParallel("web-host")] // Serilog's bootstrap logger is static: one host at a time
     public async Task Http_Search_ReturnsEnvelope_AndBadInputIs400()
     {
         (NewsSearchService _, FakeArticleSource source) = await Indexed();
@@ -93,7 +94,7 @@ public class SearchTests
         await Assert.That(admin.StatusCode).IsEqualTo(HttpStatusCode.NotFound); // management path, public port
     }
 
-    private static WebApplicationFactory<Program> Factory(FakeArticleSource source, FakeVectorStore store) =>
+    internal static WebApplicationFactory<Program> Factory(FakeArticleSource source, FakeVectorStore store, FakeKeywordStore? keywords = null) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
         {
             b.UseSetting("NewsIdx:Sync:OnStartup", "Never");
@@ -102,6 +103,7 @@ public class SearchTests
                 services.AddSingleton<INewsArticleSource>(source);
                 services.AddSingleton<ITextEmbedder>(new FakeEmbedder());
                 services.AddSingleton<IVectorStore>(store);
+                services.AddSingleton<IKeywordStore>(keywords ?? new FakeKeywordStore());
             });
         });
 }

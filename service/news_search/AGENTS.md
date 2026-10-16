@@ -1,7 +1,7 @@
 # news_search (C# / .NET 10) — Agent Context
 
 Fan-out news search for the portal: one endpoint per search engine, so the page shows each engine's results
-as they arrive. Today: `vector` (via news_idx on CTRL). Planned: `bm25`, `image`. **The SQL LIKE search is
+as they arrive. Today: `vector` and `bm25` (both via news_idx on CTRL). Planned: `image`. **The SQL LIKE search is
 not here; it stays on docapi (jnode).** Runs on **csnode** behind cproxy (`/api/v1/newssearch/`).
 
 **Source of truth:** `docs/specification.md`. Session log: `docs/memory.md` (local). History: `CHANGELOG.md`.

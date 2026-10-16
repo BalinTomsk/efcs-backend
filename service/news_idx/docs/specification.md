@@ -4,10 +4,12 @@ Version: see `NewsIdx/NewsIdx.csproj` (`<Version>`). History: `../CHANGELOG.md`.
 
 ## 1. Purpose
 
-Semantic (meaning-based) search over FishFind news articles. An article published or edited in the portal
+Semantic (meaning-based) and keyword (BM25) search over FishFind news articles. An article published or edited in the portal
 editor raises a RabbitMQ event; news_idx reads that article from the MySQL `news` table, embeds it with
 **BAAI/bge-small-en-v1.5** (in-process, ONNX Runtime, CPU) and stores the vectors in **Qdrant**. The
-frontend asks `GET /api/v1/newsidx/search?q=…` and gets articles ranked by meaning, not keywords.
+frontend asks `GET /api/v1/newsidx/search?q=…` and gets articles ranked by meaning, not keywords. The same
+article's BM25 term vector goes into a second collection, and `GET /api/v1/newsidx/bm25?q=…` ranks by
+keywords (§7a).
 
 docapi's keyword search (`/api/v1/news/search`, SQL `LIKE`) is untouched; this is an addition.
 
@@ -29,7 +31,8 @@ NewsIdx/
   Embedding/BgeSmallEmbedder      tokenizer + ONNX + CLS pooling + L2 norm
   Indexing/                       NewsChunker, NewsIndexer, NewsSyncService, IndexBootstrap
   Messaging/                      RabbitMQ management-API client, NewsEventConsumer
-  Search/                         IVectorStore, QdrantVectorStore, NewsSearchService
+  Search/                         IVectorStore, QdrantVectorStore, NewsSearchService,
+                                  Bm25Encoder, PorterStemmer, IKeywordStore, QdrantKeywordStore
   Web/                            envelope, exception mapping, health checks, controllers
 NewsIdx.Tests/                   TUnit, fakes for MySQL / model / Qdrant / RabbitMQ
 scripts/fetch-model.ps1           downloads the model into models/ (git-ignored)
@@ -93,6 +96,25 @@ missing; startup refuses a collection of another size. One point per chunk:
 Re-index = upsert chunks 0..n-1 (fixed ids overwrite) then delete `news_id = X AND chunk ≥ n`, so an article
 is never missing from search while it is re-indexed.
 
+## 7a. BM25 keyword index
+
+Collection `news_articles_bm25` (`NewsIdx:Bm25:Collection`), created at startup if missing. Startup refuses
+an existing collection without a sparse vector `bm25` that has `modifier = idf`. One point per article, id =
+`PointId(news_id, 0)`. Payload: `news_id` (keyword index), `country` (keyword index), `stamp_unix` (integer
+index), `title`, `source`, `stamp`, `lake_id`, `last_edit_unix`, `text` (body, at most 4000 chars, for the
+snippet), `analyzer`.
+
+- **Text:** title + paragraphs + photo captions, cleaned like the chunks.
+- **Analyzer `bm25-porter-v1`:** NFD accent folding, lower case, split on non-letter/digit, words of 2–40
+  chars, English stop words removed, Porter (1980) stemmer, term → FNV-1a 32-bit hash = sparse index.
+- **Document weight** per term: `tf·(k1+1) / (tf + k1·(1 − b + b·dl/avgdl))`, with `K1` 1.2, `B` 0.75,
+  `AvgDocLength` 256 (fixed, so an edit never re-weights other articles), and title terms counted
+  `TitleWeight` (2) times.
+- **Query:** weight 1 per distinct term. Qdrant multiplies by IDF = `ln(1 + (N − n + 0.5)/(n + 0.5))` from
+  its live counts, so the score is BM25. A query of only stop words returns no items.
+- **Snippet:** about 240 chars of the body, starting near the first word that matches a query term.
+- Any change to the analyzer or the parameters needs `POST /admin/sync?full=true`.
+
 ## 8. Events — `fishfind.news-event.v1` (the frontend's half is NOT built yet)
 
 Transport: RabbitMQ **management HTTP API**, like the account events — publish
@@ -118,7 +140,8 @@ The consumer runs only when `RABBITMQ_MANAGEMENT_URL`, `RABBITMQ_USERNAME` and `
 
 ## 9. Initial load and sync ("index every article in MySQL")
 
-`NewsSyncService` compares MySQL's published versions with the index's chunk-0 `last_edit_unix`:
+`NewsSyncService` compares MySQL's published versions with the vector index's chunk-0 `last_edit_unix` **and**
+the BM25 index's `last_edit_unix`. An article missing or stale in either one is re-indexed into both.
 
 - **Incremental:** index missing or changed articles only (second precision).
 - **Full:** re-embed every published article (needed after a model/chunking change).
@@ -130,7 +153,7 @@ Triggers:
 
 | how | what |
 |---|---|
-| startup, `NewsIdx:Sync:OnStartup` | `IfEmpty` (default) → full run when the collection has no points; `Always` → incremental; `Never` |
+| startup, `NewsIdx:Sync:OnStartup` | `IfEmpty` (default) → full run when the vector collection has no points, incremental when only the BM25 one is empty; `Always` → incremental; `Never` |
 | every `NewsIdx:Sync:IntervalMinutes` (60; 0 = off) | incremental |
 | `POST /admin/sync?full=true` (8081) | full, in the background; `GET /admin/sync` = progress; 409 if running |
 | `NewsIdx --sync-full` / `--sync` | one-shot: run, exit 0 (all ok) / 2 (some failed) / 1 (fatal) |
@@ -153,6 +176,11 @@ Triggers:
 Errors (envelope `error.code`): 400 `invalid_request`; 503 `unavailable` (Qdrant breaker open, `Retry-After: 30`);
 404 `not_found`; 500 `internal_error` (details only in the log).
 
+### `GET /api/v1/newsidx/bm25?q={text}[&limit=10][&country=CA]`
+
+Same parameters, validation, errors and answer shape as `/search`. Ranked by BM25 (§7a), one hit per
+article. `score` is the BM25 score: unbounded, and not comparable with cosine.
+
 ### `GET /health` — `{ status, version, uptime }` (Docker HEALTHCHECK target)
 
 ## 11. Management (port 8081 — never publish)
@@ -160,7 +188,7 @@ Errors (envelope `error.code`): 400 `invalid_request`; 503 `unavailable` (Qdrant
 `/health/live` (process only), `/health/ready` (Qdrant unhealthy = not ready; MySQL failing = degraded,
 search still served), `/metrics`, `/admin/*` (§9). Metrics: `newsidx_index_articles_total{outcome}`,
 `newsidx_index_chunks_total`, `newsidx_sync_runs_total{mode,outcome}`, `newsidx_events_total{outcome}`,
-`newsidx_search_seconds`.
+`newsidx_search_seconds`, `newsidx_bm25_search_seconds`.
 
 ## 12. Deployment
 
@@ -182,5 +210,6 @@ search still served), `/metrics`, `/admin/*` (§9). Metrics: `newsidx_index_arti
 ```
 dotnet build NewsIdx.slnx
 dotnet run --project NewsIdx.Tests
+QDRANT_TEST_URL=http://localhost:6334 dotnet run --project NewsIdx.Tests   # + the real-Qdrant BM25 test
 docker compose up -d qdrant ; ./scripts/fetch-model.ps1 ; dotnet run --project NewsIdx --no-launch-profile
 ```

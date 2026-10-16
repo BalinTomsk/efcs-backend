@@ -6,7 +6,7 @@ using NewsIdx.Search;
 namespace NewsIdx.Indexing;
 
 /// <summary>
-/// Opens the index once the process is up: creates the Qdrant collection if needed (retrying until Qdrant
+/// Opens the index once the process is up: creates the Qdrant collections (vectors, BM25) if needed (retrying until Qdrant
 /// answers, never crashing the container — the droplets are small and a crash loop starves the neighbours),
 /// then runs the startup sync and the periodic one.
 ///
@@ -16,6 +16,7 @@ namespace NewsIdx.Indexing;
 public sealed class IndexBootstrap : BackgroundService
 {
     private readonly IVectorStore _store;
+    private readonly IKeywordStore _keywords;
     private readonly ITextEmbedder _embedder;
     private readonly NewsSyncService _sync;
     private readonly SyncOptions _options;
@@ -23,10 +24,11 @@ public sealed class IndexBootstrap : BackgroundService
     private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public IndexBootstrap(
-        IVectorStore store, ITextEmbedder embedder, NewsSyncService sync,
+        IVectorStore store, IKeywordStore keywords, ITextEmbedder embedder, NewsSyncService sync,
         IOptions<NewsIdxOptions> options, ILogger<IndexBootstrap> logger)
     {
         _store = store;
+        _keywords = keywords;
         _embedder = embedder;
         _sync = sync;
         _options = options.Value.Sync;
@@ -71,6 +73,7 @@ public sealed class IndexBootstrap : BackgroundService
             try
             {
                 await _store.EnsureCollectionAsync(_embedder.Dimension, stoppingToken).ConfigureAwait(false);
+                await _keywords.EnsureCollectionAsync(stoppingToken).ConfigureAwait(false);
                 return;
             }
             catch (InvalidOperationException)
@@ -100,12 +103,22 @@ public sealed class IndexBootstrap : BackgroundService
                 break;
             default: // "ifempty"
                 ulong points = await _store.CountAsync(stoppingToken).ConfigureAwait(false);
-                if (points > 0)
+                ulong keywordPoints = await _keywords.CountAsync(stoppingToken).ConfigureAwait(false);
+                if (points == 0)
+                {
+                    full = true;
+                }
+                else if (keywordPoints == 0)
+                {
+                    // A new BM25 collection beside a filled vector one: incremental indexes what BM25 lacks.
+                    _logger.LogInformation("BM25 index is empty while the vector index has {Points} points; filling it.", points);
+                    full = false;
+                }
+                else
                 {
                     _logger.LogInformation("News index has {Points} points; startup sync skipped (OnStartup=IfEmpty).", points);
                     return;
                 }
-                full = true;
                 break;
         }
 

@@ -6,6 +6,25 @@ carries the history.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-10-16
+
+### Added
+- **BM25 keyword search**, `GET /api/v1/newsidx/bm25` (same parameters and answer shape as `/search`). Semantic
+  search drops rare exact terms (a weak "keta" hit falls under MinScore), and SQL `LIKE` does not rank at all.
+  BM25 finds the exact words and ranks rare ones higher.
+- Second Qdrant collection `news_articles_bm25` with one point per article and a sparse vector `bm25` with
+  `modifier = idf`. Qdrant computes the IDF from its live counts, and news_idx stores only the saturated,
+  length-normalized term frequency (k1 1.2, b 0.75, fixed avgdl 256, title words x2). So an edit never
+  re-weights other articles. It is a separate collection because Qdrant cannot add a vector to the live
+  dense collection.
+- Analyzer `bm25-porter-v1`: accent folding, lower case, English stop words, Porter stemmer, FNV-1a term
+  hashing. Changing it needs a full sync.
+- The sync and every event now keep both indexes in step. An article missing from either one is re-indexed.
+  At startup, an empty BM25 collection next to a filled vector one triggers an incremental sync, which
+  fills it. This re-embeds every article once.
+- `QdrantKeywordStoreTests` runs against a real Qdrant when `QDRANT_TEST_URL` is set. It caught a
+  `Condition -> Filter` null conversion that the fakes could not.
+
 ## [0.2.0] — 2026-10-16
 
 ### Changed

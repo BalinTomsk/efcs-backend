@@ -13,6 +13,7 @@ public sealed class NewsIdxOptions
     public EmbeddingOptions Embedding { get; set; } = new();
     public ChunkingOptions Chunking { get; set; } = new();
     public SearchOptions Search { get; set; } = new();
+    public Bm25Options Bm25 { get; set; } = new();
     public EventOptions Events { get; set; } = new();
     public SyncOptions Sync { get; set; } = new();
 }
@@ -72,6 +73,31 @@ public sealed class SearchOptions
 
     /// <summary>Cosine similarity below which a hit is dropped. 0 keeps everything.</summary>
     public float MinScore { get; set; } = 0.0f;
+}
+
+/// <summary>
+/// Keyword (BM25) search. Changing <c>K1</c>, <c>B</c>, <c>AvgDocLength</c> or <c>TitleWeight</c> changes the
+/// stored document weights: run <c>POST /admin/sync?full=true</c> afterwards.
+/// </summary>
+public sealed class Bm25Options
+{
+    /// <summary>Collection holding one point per article with its sparse term vector.</summary>
+    public string Collection { get; set; } = "news_articles_bm25";
+
+    /// <summary>Term-frequency saturation: how quickly repeating a word stops adding to the score.</summary>
+    public double K1 { get; set; } = 1.2;
+
+    /// <summary>Length normalization: 0 ignores article length, 1 normalizes fully.</summary>
+    public double B { get; set; } = 0.75;
+
+    /// <summary>
+    /// Average article length in analyzed terms (title counted <see cref="TitleWeight"/> times). Fixed rather
+    /// than measured, so one article's edit never shifts every other article's weights.
+    /// </summary>
+    public double AvgDocLength { get; set; } = 256;
+
+    /// <summary>How many times a title word counts.</summary>
+    public int TitleWeight { get; set; } = 2;
 }
 
 public sealed class EventOptions

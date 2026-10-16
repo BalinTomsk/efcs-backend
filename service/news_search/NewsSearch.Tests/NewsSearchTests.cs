@@ -79,17 +79,35 @@ public class NewsSearchTests
     }
 
     [Test]
+    public async Task Http_Bm25Source_CallsTheBm25Route()
+    {
+        var upstream = new FakeHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(NewsIdxAnswer, System.Text.Encoding.UTF8, "application/json"),
+        });
+        await using WebApplicationFactory<Program> factory = Factory(upstream);
+
+        HttpResponseMessage ok = await factory.CreateClient().GetAsync("/api/v1/newssearch/bm25?q=keta&limit=3");
+        JsonElement body = await ok.Content.ReadFromJsonAsync<JsonElement>();
+
+        await Assert.That(ok.StatusCode).IsEqualTo(HttpStatusCode.OK);
+        await Assert.That(body.GetProperty("data").GetProperty("source").GetString()).IsEqualTo("bm25");
+        await Assert.That(upstream.LastUri!.PathAndQuery).IsEqualTo("/api/v1/newsidx/bm25?q=keta&limit=3");
+    }
+
+    [Test]
     public async Task Http_SourcesList_UnknownSource_BadQuery()
     {
         await using WebApplicationFactory<Program> factory = Factory(new FakeHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)));
         HttpClient client = factory.CreateClient();
 
         JsonElement sources = await client.GetFromJsonAsync<JsonElement>("/api/v1/newssearch/sources");
-        HttpResponseMessage unknown = await client.GetAsync("/api/v1/newssearch/bm25?q=x");
+        HttpResponseMessage unknown = await client.GetAsync("/api/v1/newssearch/image?q=x");
         HttpResponseMessage bad = await client.GetAsync("/api/v1/newssearch/vector?q=");
         HttpResponseMessage metricsOnPublic = await client.GetAsync("/metrics");
 
-        await Assert.That(sources.GetProperty("data")[0].GetProperty("name").GetString()).IsEqualTo("vector");
+        await Assert.That(sources.GetProperty("data").EnumerateArray().Select(s => s.GetProperty("name").GetString()))
+            .IsEquivalentTo(new[] { "bm25", "vector" });
         await Assert.That(unknown.StatusCode).IsEqualTo(HttpStatusCode.NotFound);
         await Assert.That(bad.StatusCode).IsEqualTo(HttpStatusCode.BadRequest);
         await Assert.That(metricsOnPublic.StatusCode).IsEqualTo(HttpStatusCode.NotFound);
@@ -118,7 +136,7 @@ public class NewsSearchTests
         {
             b.UseSetting("NEWSIDX_URL", "http://news-idx.test:4324");
             b.ConfigureTestServices(services =>
-                services.Configure<HttpClientFactoryOptions>(VectorSource.HttpClientName,
+                services.Configure<HttpClientFactoryOptions>(NewsIdxSource.HttpClientName,
                     o => o.HttpMessageHandlerBuilderActions.Add(h => h.PrimaryHandler = upstream)));
         });
 
