@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>NewsIdx</RootNamespace>
+    <AssemblyName>NewsIdx</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Version drives the /health "version" field; keep in step with the service release tag. -->
+    <Version>0.2.0</Version>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="NewsIdx.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\docs\**\*" Link="docs\%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- MySQL driver for the Winhost `news` table (MIT, fully async). -->
+    <PackageReference Include="MySqlConnector" Version="2.6.2" />
+    <!-- Qdrant vector database client (gRPC, port 6334). -->
+    <PackageReference Include="Qdrant.Client" Version="1.19.0" />
+    <!-- BGE-small-en-v1.5 inference: ONNX model + its WordPiece (BERT) tokenizer. -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.31.0" />
+    <PackageReference Include="Microsoft.ML.Tokenizers" Version="2.0.0" />
+    <!-- Resilience: retry + circuit breaker around MySQL and Qdrant. -->
+    <PackageReference Include="Polly.Core" Version="8.5.2" />
+    <PackageReference Include="Polly.Extensions" Version="8.5.2" />
+    <!-- Structured JSON logging with a 7-day rolling file, same policy as the siblings. -->
+    <PackageReference Include="Serilog.AspNetCore" Version="9.0.0" />
+    <PackageReference Include="Serilog.Formatting.Compact" Version="3.0.0" />
+    <PackageReference Include="prometheus-net.AspNetCore" Version="8.2.1" />
+  </ItemGroup>
+
+</Project>
