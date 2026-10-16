@@ -1,0 +1,25 @@
+# .NET build output
+bin/
+obj/
+publish/
+*.user
+
+# Local runtime logs
+logs/
+
+# Secrets / local env (never commit)
+.env
+secret/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+
+
+# Deploy runbook with host details -- never in the public repo
+docs/do-update.md
+
+# Deploy runbook with host details -- never in the public repo
+docs/do-update.md
+docs/deploy_news_search.sh
