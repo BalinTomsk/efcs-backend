@@ -5,30 +5,33 @@ using Polly.CircuitBreaker;
 namespace NewsSearch.Sources;
 
 /// <summary>
-/// Semantic search: asks news_idx (on CTRL), which embeds the query with bge-small-en-v1.5 and searches
-/// Qdrant. news_search holds no model; news_idx is the only process that does. The HTTP client carries
-/// the timeout, retry and circuit breaker (see ServiceRegistration).
+/// A source answered by news_idx (on CTRL), which holds both indexes in Qdrant. news_search holds no model
+/// and no index. Every news_idx source shares one HTTP client, so they share its timeout, retry and circuit
+/// breaker (see ServiceRegistration): when news_idx is down, all of them answer 503 at once.
 /// </summary>
-public sealed class VectorSource : ISearchSource
+public abstract class NewsIdxSource : ISearchSource
 {
     public const string HttpClientName = "newsidx";
 
     private readonly IHttpClientFactory _clients;
-    private readonly ILogger<VectorSource> _logger;
+    private readonly ILogger _logger;
 
-    public VectorSource(IHttpClientFactory clients, ILogger<VectorSource> logger)
+    protected NewsIdxSource(IHttpClientFactory clients, ILogger logger)
     {
         _clients = clients;
         _logger = logger;
     }
 
-    public string Name => "vector";
+    public abstract string Name { get; }
 
-    public string Description => "Semantic (meaning-based) search: bge-small-en-v1.5 embeddings in Qdrant, via news_idx.";
+    public abstract string Description { get; }
+
+    /// <summary>The news_idx route under <c>/api/v1/newsidx/</c>.</summary>
+    protected abstract string Endpoint { get; }
 
     public async Task<IReadOnlyList<SearchHit>> SearchAsync(SearchRequest request, CancellationToken cancellationToken)
     {
-        string url = $"api/v1/newsidx/search?q={Uri.EscapeDataString(request.Query)}&limit={request.Limit}"
+        string url = $"api/v1/newsidx/{Endpoint}?q={Uri.EscapeDataString(request.Query)}&limit={request.Limit}"
                      + (request.Country is null ? string.Empty : $"&country={request.Country}");
 
         HttpResponseMessage response;
@@ -40,7 +43,7 @@ public sealed class VectorSource : ISearchSource
                                        or TimeoutException or Polly.Timeout.TimeoutRejectedException
                                    && !cancellationToken.IsCancellationRequested)
         {
-            _logger.LogWarning(ex, "news_idx call failed");
+            _logger.LogWarning(ex, "news_idx call failed. source={Source}", Name);
             throw new SourceUnavailableException(Name, ex.GetType().Name, ex);
         }
 
@@ -103,4 +106,28 @@ public sealed class VectorSource : ISearchSource
             return "invalid request";
         }
     }
+}
+
+/// <summary>Semantic search: news_idx embeds the query with bge-small-en-v1.5 and searches Qdrant's vectors.</summary>
+public sealed class VectorSource(IHttpClientFactory clients, ILogger<VectorSource> logger) : NewsIdxSource(clients, logger)
+{
+    public override string Name => "vector";
+
+    public override string Description => "Semantic (meaning-based) search: bge-small-en-v1.5 embeddings in Qdrant, via news_idx.";
+
+    protected override string Endpoint => "search";
+}
+
+/// <summary>
+/// Keyword search ranked by BM25: news_idx matches the query's stemmed words in a Qdrant sparse index, rarer
+/// words weighing more. Finds exact names and terms (a lake, a species, "keta") that meaning-based search
+/// can miss.
+/// </summary>
+public sealed class Bm25Source(IHttpClientFactory clients, ILogger<Bm25Source> logger) : NewsIdxSource(clients, logger)
+{
+    public override string Name => "bm25";
+
+    public override string Description => "Keyword search ranked by BM25 (stemmed words, rare words weigh more), via news_idx.";
+
+    protected override string Endpoint => "bm25";
 }

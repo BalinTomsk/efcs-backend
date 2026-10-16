@@ -27,6 +27,8 @@ public class NewsIndexer
     private readonly INewsArticleSource _source;
     private readonly ITextEmbedder _embedder;
     private readonly IVectorStore _store;
+    private readonly IKeywordStore _keywords;
+    private readonly Bm25Encoder _bm25;
     private readonly ResiliencePipeline _mysql;
     private readonly ChunkingOptions _chunking;
     private readonly ILogger<NewsIndexer> _logger;
@@ -35,6 +37,7 @@ public class NewsIndexer
         INewsArticleSource source,
         ITextEmbedder embedder,
         IVectorStore store,
+        IKeywordStore keywords,
         ResiliencePipelineProvider<string> pipelines,
         IOptions<NewsIdxOptions> options,
         ILogger<NewsIndexer> logger)
@@ -42,12 +45,14 @@ public class NewsIndexer
         _source = source;
         _embedder = embedder;
         _store = store;
+        _keywords = keywords;
+        _bm25 = new Bm25Encoder(options.Value.Bm25);
         _mysql = pipelines.GetPipeline(ResiliencePipelines.MySql);
         _chunking = options.Value.Chunking;
         _logger = logger;
     }
 
-    /// <summary>Indexes or removes one article. Throws when MySQL, the model or Qdrant fails.</summary>
+    /// <summary>Indexes (vectors + BM25) or removes one article. Throws when MySQL, the model or Qdrant fails.</summary>
     public virtual async Task<IndexOutcome> IndexAsync(string newsId, CancellationToken cancellationToken)
     {
         string id = NewsIds.Normalize(newsId);
@@ -58,6 +63,7 @@ public class NewsIndexer
         if (article is null)
         {
             await _store.DeleteArticleAsync(id, cancellationToken).ConfigureAwait(false);
+            await _keywords.DeleteArticleAsync(id, cancellationToken).ConfigureAwait(false);
             Outcomes.WithLabels("removed").Inc();
             _logger.LogInformation("News article removed from the index (not published). newsId={NewsId}", id);
             return new IndexOutcome(id, Indexed: false, Chunks: 0);
@@ -68,6 +74,9 @@ public class NewsIndexer
         var chunks = passages.Select((text, i) => new IndexedChunk(i, text, vectors[i])).ToList();
 
         await _store.ReplaceArticleAsync(article, chunks, _embedder.ModelName, cancellationToken).ConfigureAwait(false);
+
+        (string title, string body) = Bm25Encoder.Text(article);
+        await _keywords.ReplaceArticleAsync(article, body, _bm25.EncodeDocument(title, body), cancellationToken).ConfigureAwait(false);
         Outcomes.WithLabels("indexed").Inc();
         ChunksIndexed.Inc(chunks.Count);
         _logger.LogInformation("News article indexed. newsId={NewsId} chunks={Chunks}", id, chunks.Count);
@@ -78,6 +87,7 @@ public class NewsIndexer
     public virtual async Task RemoveAsync(string newsId, CancellationToken cancellationToken)
     {
         await _store.DeleteArticleAsync(newsId, cancellationToken).ConfigureAwait(false);
+        await _keywords.DeleteArticleAsync(newsId, cancellationToken).ConfigureAwait(false);
         Outcomes.WithLabels("removed").Inc();
     }
 }

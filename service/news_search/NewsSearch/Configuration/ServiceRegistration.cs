@@ -16,12 +16,12 @@ public static class ServiceRegistration
         services.Configure<NewsSearchOptions>(configuration.GetSection(NewsSearchOptions.SectionName));
         var enabled = new List<string>();
 
-        // vector: news_idx on CTRL (NEWSIDX_URL, e.g. http://news-idx-host:4324).
+        // vector + bm25: news_idx on CTRL (NEWSIDX_URL, e.g. http://news-idx-host:4324), one shared client.
         string? newsIdx = configuration["NEWSIDX_URL"];
         if (!string.IsNullOrWhiteSpace(newsIdx))
         {
             int timeout = configuration.GetValue($"{NewsSearchOptions.SectionName}:Vector:TimeoutSeconds", 5);
-            services.AddHttpClient(VectorSource.HttpClientName, http =>
+            services.AddHttpClient(NewsIdxSource.HttpClientName, http =>
                 {
                     http.BaseAddress = new Uri(newsIdx.TrimEnd('/') + "/");
                     http.Timeout = Timeout.InfiniteTimeSpan; // the resilience pipeline owns the timeouts
@@ -47,7 +47,9 @@ public static class ServiceRegistration
                     pipeline.AddTimeout(TimeSpan.FromSeconds(Math.Max(1, timeout) * 0.6));
                 });
             services.AddSingleton<ISearchSource, VectorSource>();
+            services.AddSingleton<ISearchSource, Bm25Source>();
             enabled.Add("vector");
+            enabled.Add("bm25");
         }
 
         services.AddSingleton<SearchService>();

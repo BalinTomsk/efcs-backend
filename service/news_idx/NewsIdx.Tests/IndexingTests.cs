@@ -204,14 +204,14 @@ public class IndexingTests
     private static NewsEventConsumer Consumer(FakeQueue queue, NewsIndexer indexer)
     {
         var options = Microsoft.Extensions.Options.Options.Create(TestSupport.Options());
-        var bootstrap = new IndexBootstrap(new FakeVectorStore(), new FakeEmbedder(),
+        var bootstrap = new IndexBootstrap(new FakeVectorStore(), new FakeKeywordStore(), new FakeEmbedder(),
             TestSupport.Sync(new FakeArticleSource(), new FakeVectorStore()), options, NullLogger<IndexBootstrap>.Instance);
         return new NewsEventConsumer(queue, indexer, bootstrap, options, NullLogger<NewsEventConsumer>.Instance);
     }
 
     /// <summary>Indexer that fails one id, and can hold every call until released.</summary>
     private sealed class FailingIndexer(FakeArticleSource source, FakeVectorStore store, string? failOn, Task? wait = null)
-        : NewsIndexer(source, new FakeEmbedder(), store, TestSupport.Pipelines(),
+        : NewsIndexer(source, new FakeEmbedder(), store, new FakeKeywordStore(), TestSupport.Pipelines(),
             Microsoft.Extensions.Options.Options.Create(new NewsIdxOptions()), NullLogger<NewsIndexer>.Instance)
     {
         public override async Task<IndexOutcome> IndexAsync(string newsId, CancellationToken cancellationToken)

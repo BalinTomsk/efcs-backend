@@ -10,8 +10,9 @@ they arrive. news_search is the home for every engine **except** the SQL keyword
 | source | where | status |
 |---|---|---|
 | `sql` (LIKE) | docapi `/api/v1/news/search` on **jnode** | live (unchanged) |
-| `vector` | news_search → news_idx on **CTRL** | 0.1.0 |
-| `bm25`, `image` | news_search | planned |
+| `vector` | news_search → news_idx on **CTRL** (`/newsidx/search`) | 0.1.0 |
+| `bm25` | news_search → news_idx on **CTRL** (`/newsidx/bm25`) | 0.2.0 |
+| `image` | news_search | planned |
 
 The SQL search stays on jnode and everything else is on csnode, so if one node fails, the other's
 results still show. news_search never calls docapi.
@@ -44,8 +45,9 @@ Management (8081, never published): `/health/live`, `/health/ready`, `/metrics`
 `ISearchSource` (`Name`, `Description`, `SearchAsync`). A new source is one class plus one registration,
 with no change to cproxy or the controller.
 
-### vector
-Calls news_idx `GET /api/v1/newsidx/search` at `NEWSIDX_URL` (CTRL's forwarded port). Resilience: a 5 s
+### vector, bm25 (`NewsIdxSource`)
+`vector` calls news_idx `GET /api/v1/newsidx/search` and `bm25` calls `GET /api/v1/newsidx/bm25`, both at
+`NEWSIDX_URL` (CTRL's forwarded port), through one shared HTTP client. Resilience: a 5 s
 total budget (`NewsSearch:Vector:TimeoutSeconds`), one retry after 200 ms, a per-attempt timeout of 60 %
 of the budget, and a circuit breaker (50 % failures over 30 s, minimum 5 calls, open 30 s). CTRL's
 firewall must allow csnode's public address (rule `news_idx 8080 - block all but cproxy and LAN`, see
@@ -55,7 +57,7 @@ news_idx's runbook).
 
 | key | meaning |
 |---|---|
-| `NEWSIDX_URL` | news_idx origin, e.g. `http://vector.fishfind.info:4324`. Unset = no `vector` source |
+| `NEWSIDX_URL` | news_idx origin, e.g. `http://vector.fishfind.info:4324`. Unset = no `vector` and no `bm25` source |
 | `NewsSearch__Search__MaxLimit` etc. | limits, see `appsettings.json` |
 
 ## 6. Exposure
@@ -67,8 +69,9 @@ bound to localhost and the VPC address only.
 ## 7. Frontend
 
 `News.aspx` (registered users) still renders the SQL results server-side from docapi. After the page
-loads, `NewsSearchSource.ashx?src=vector&q=` (server-side, through cproxy) is called from the browser, and
-its hits fill a "Related by meaning" panel, minus articles already in the SQL list. Each source is its
+loads, the browser calls `NewsSearchSource.ashx?src={bm25|vector}&q=` (server-side, through cproxy) once per
+engine. Their hits fill a "More results" panel, minus articles already in the SQL list or shown by an
+earlier engine. Each source is its
 own call, so a slow or failed source never delays or blanks the others.
 
 ## 7a. Build, test, run

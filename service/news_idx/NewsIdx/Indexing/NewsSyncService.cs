@@ -20,6 +20,9 @@ namespace NewsIdx.Indexing;
 /// </list>
 /// Both remove articles that are indexed but no longer published.
 ///
+/// <para>Both indexes (vectors and BM25) are reconciled together: an article missing from either one is
+/// re-indexed into both, which is also how a new, empty BM25 collection gets filled.</para>
+///
 /// <para>Single-flight: a second request while one runs is refused (<see cref="TryStart"/> returns
 /// <c>false</c>), never queued. One article failing is logged and counted; the run goes on.</para>
 ///
@@ -34,6 +37,7 @@ public class NewsSyncService
 
     private readonly INewsArticleSource _source;
     private readonly IVectorStore _store;
+    private readonly IKeywordStore _keywords;
     private readonly NewsIndexer _indexer;
     private readonly ResiliencePipeline _mysql;
     private readonly TimeProvider _time;
@@ -44,6 +48,7 @@ public class NewsSyncService
     public NewsSyncService(
         INewsArticleSource source,
         IVectorStore store,
+        IKeywordStore keywords,
         NewsIndexer indexer,
         ResiliencePipelineProvider<string> pipelines,
         TimeProvider time,
@@ -51,6 +56,7 @@ public class NewsSyncService
     {
         _source = source;
         _store = store;
+        _keywords = keywords;
         _indexer = indexer;
         _mysql = pipelines.GetPipeline(ResiliencePipelines.MySql);
         _time = time;
@@ -113,10 +119,12 @@ public class NewsSyncService
                 .ExecuteAsync(async ct => await _source.ListPublishedVersionsAsync(ct).ConfigureAwait(false), cancellationToken)
                 .ConfigureAwait(false);
             IReadOnlyDictionary<string, DateTime> indexed = await _store.ListIndexedVersionsAsync(cancellationToken).ConfigureAwait(false);
+            IReadOnlyDictionary<string, DateTime> keywords = await _keywords.ListIndexedVersionsAsync(cancellationToken).ConfigureAwait(false);
 
             status.Published = published.Count;
+            // An article is current only when both indexes hold its latest edit.
             var todo = published
-                .Where(p => full || !indexed.TryGetValue(p.NewsId, out DateTime at) || at < Truncate(p.LastEditUtc))
+                .Where(p => full || Stale(indexed, p) || Stale(keywords, p))
                 .Select(p => p.NewsId)
                 .Distinct(StringComparer.Ordinal)
                 .ToList();
@@ -138,16 +146,17 @@ public class NewsSyncService
                 }
             }
 
-            if (published.Count == 0 && indexed.Count > 0)
+            if (published.Count == 0 && (indexed.Count > 0 || keywords.Count > 0))
             {
                 status.PruneSkipped = true;
                 _logger.LogWarning(
-                    "MySQL reported no published news while the index holds {Indexed} articles; prune skipped.", indexed.Count);
+                    "MySQL reported no published news while the index holds {Indexed} articles; prune skipped.",
+                    Math.Max(indexed.Count, keywords.Count));
             }
             else
             {
                 var live = published.Select(p => p.NewsId).ToHashSet(StringComparer.Ordinal);
-                foreach (string gone in indexed.Keys.Where(id => !live.Contains(id)))
+                foreach (string gone in indexed.Keys.Union(keywords.Keys).Where(id => !live.Contains(id)))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     await _indexer.RemoveAsync(gone, cancellationToken).ConfigureAwait(false);
@@ -175,6 +184,9 @@ public class NewsSyncService
 
         return status;
     }
+
+    private static bool Stale(IReadOnlyDictionary<string, DateTime> index, Domain.NewsVersion p) =>
+        !index.TryGetValue(p.NewsId, out DateTime at) || at < Truncate(p.LastEditUtc);
 
     // The index stores whole seconds; MySQL's DATETIME(6) carries microseconds.
     private static DateTime Truncate(DateTime t) => new(t.Ticks - t.Ticks % TimeSpan.TicksPerSecond, DateTimeKind.Utc);

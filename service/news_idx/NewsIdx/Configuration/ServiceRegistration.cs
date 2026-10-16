@@ -57,6 +57,7 @@ public static class ServiceRegistration
         });
         services.AddSingleton<QdrantVectorStore>();
         services.AddSingleton<IVectorStore>(sp => sp.GetRequiredService<QdrantVectorStore>());
+        services.AddSingleton<IKeywordStore, QdrantKeywordStore>();
 
         // Indexing + search.
         services.AddSingleton<NewsIndexer>();
