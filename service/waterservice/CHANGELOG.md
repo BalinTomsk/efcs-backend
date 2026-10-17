@@ -10,6 +10,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The ver
 
 ## [Unreleased]
 
+## [10.4.1] — 2026-10-17 (not deployed)
+
+### Changed
+- **`DOTNET_TieredPGO=0` in the image** (was 1). csnode is a 1 GB droplet running five .NET services with about
+  125 MB available; PGO keeps extra instrumented code versions. Measured on waterapi with 1 CPU: about 15 MB less per
+  container. Not a leak fix -- csnode memory was flat over a 4-minute per-process sample; it is simply full.
+
 ## [10.4.0] — 2026-10-16 (not deployed)
 
 ### Added

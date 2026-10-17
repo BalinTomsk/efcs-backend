@@ -10,7 +10,7 @@
          "Globalization Invariant Mode is not supported" at connection open. The runtime image
          installs ICU (libicu) instead. -->
     <!-- Version drives the /health "version" field and the status this service reports about itself. -->
-    <Version>0.1.0</Version>
+    <Version>0.1.1</Version>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <!-- Workstation, non-concurrent GC (as news_search): the Web SDK defaults to server GC, which reserves far more
          memory than a queue poller needs. csnode is small and shared. -->

@@ -41,8 +41,10 @@ RUN groupadd --system --gid 10001 app \
 USER 10001:10001
 
 # Keep the container in UTC — the persistence layer stores UTC wall-clock timestamps.
+# TieredPGO off: csnode is a 1 GB droplet running five .NET services. PGO keeps extra instrumented code
+# versions; off measured about 15 MB less per container (2026-10-17), at a small steady-state speed cost.
 ENV TZ=UTC \
-    DOTNET_TieredPGO=1
+    DOTNET_TieredPGO=0
 
 # 8081 carries the health endpoints; the app has no other HTTP surface. Nothing listens on 8080.
 EXPOSE 8081
