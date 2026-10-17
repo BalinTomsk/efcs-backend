@@ -19,6 +19,14 @@ public sealed class SelfStatusReporter : BackgroundService
     private readonly TimeProvider _time;
     private readonly ILogger<SelfStatusReporter> _logger;
     private readonly string _machine;
+    private readonly int _intervalSeconds;
+
+    /// <summary>Same floor as every publisher: never more often than once a minute.</summary>
+    public const int MinIntervalSeconds = 60;
+
+    /// <summary><c>STATUS_INTERVAL_SECONDS</c> (env file) wins over <c>AdminService:Status:HeartbeatSeconds</c>.</summary>
+    internal static int IntervalSeconds(int? envSeconds, int optionSeconds) =>
+        Math.Max(MinIntervalSeconds, envSeconds ?? optionSeconds);
 
     public SelfStatusReporter(
         IServiceStatusRepository repository, IOptions<AdminOptions> options, TimeProvider time,
@@ -29,6 +37,7 @@ public sealed class SelfStatusReporter : BackgroundService
         _time = time;
         _logger = logger;
         _machine = MachineName(configuration["STATUS_MACHINE"] ?? _options.Machine);
+        _intervalSeconds = IntervalSeconds(configuration.GetValue<int?>("STATUS_INTERVAL_SECONDS"), _options.HeartbeatSeconds);
     }
 
     internal static string MachineName(string? configured) =>
@@ -37,7 +46,7 @@ public sealed class SelfStatusReporter : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         string evt = "start";
-        var interval = TimeSpan.FromSeconds(Math.Max(10, _options.HeartbeatSeconds));
+        var interval = TimeSpan.FromSeconds(_intervalSeconds);
         try
         {
             while (!stoppingToken.IsCancellationRequested)

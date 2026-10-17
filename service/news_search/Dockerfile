@@ -31,8 +31,10 @@ RUN groupadd --system --gid 10001 app \
  && mkdir -p /app/logs && chown -R app:app /app/logs
 USER 10001:10001
 
+# TieredPGO off: csnode is a 1 GB droplet running five .NET services. PGO keeps extra instrumented code
+# versions; off measured about 15 MB less per container (2026-10-17), at a small steady-state speed cost.
 ENV TZ=UTC \
-    DOTNET_TieredPGO=1
+    DOTNET_TieredPGO=0
 
 # 8080 = public search API + /health. 8081 = private metrics/probes (do NOT publish it).
 EXPOSE 8080

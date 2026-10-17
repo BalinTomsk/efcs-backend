@@ -148,9 +148,19 @@ public sealed record ServiceStatusSettings(string Service, string Machine, TimeS
 public static class ServiceStatusRegistration
 {
     /// <summary>
+    /// Floor for <c>STATUS_INTERVAL_SECONDS</c>: a service never reports more often than once a minute, whatever the env
+    /// file says, which bounds RabbitMQ traffic. Larger values report less often; then raise the page's
+    /// <c>ServiceStatusDeadAfterSeconds</c> to at least 3x the interval, or healthy services read as dead.
+    /// </summary>
+    public const int MinIntervalSeconds = 60;
+
+    internal static int ReportIntervalSeconds(int configured) => Math.Max(MinIntervalSeconds, configured);
+
+    /// <summary>
     /// Registers <see cref="ServiceActivity"/> always (callers can record unconditionally) and the reporter when
     /// <c>RABBITMQ_MANAGEMENT_URL</c>, <c>RABBITMQ_USERNAME</c> and <c>RABBITMQ_PASSWORD</c> are all set.
     /// <c>STATUS_MACHINE</c> names the host (inside Docker the machine name is the container id).
+    /// <c>STATUS_INTERVAL_SECONDS</c> sets the heartbeat period (default and minimum 60).
     /// </summary>
     /// <returns><c>true</c> when the reporter runs.</returns>
     public static bool AddServiceStatusReporting(this IServiceCollection services, IConfiguration configuration, string service)
@@ -166,7 +176,7 @@ public static class ServiceStatusRegistration
         }
 
         string machine = (NullIfBlank(configuration["STATUS_MACHINE"]) ?? Environment.MachineName).ToLowerInvariant();
-        int seconds = Math.Max(10, configuration.GetValue("STATUS_INTERVAL_SECONDS", 60));
+        int seconds = ReportIntervalSeconds(configuration.GetValue("STATUS_INTERVAL_SECONDS", MinIntervalSeconds));
         services.AddSingleton(new ServiceStatusSettings(service, machine, TimeSpan.FromSeconds(seconds)));
         services.AddHttpClient<ServiceStatusReporter>(http =>
         {
