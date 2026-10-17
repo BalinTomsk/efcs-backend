@@ -10,7 +10,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The ver
 
 ## [Unreleased]
 
-_Nothing yet._
+## [10.4.0] — 2026-10-16 (not deployed)
+
+### Added
+- **Service status for the admin page.** `Status/ServiceStatusReporter` publishes `fishfind.service-status.v1`
+  (`start`, a `heartbeat` every 60 s, `stop` on a clean shutdown) to `fishfind.servicestatus.events` over the
+  RabbitMQ management HTTP API; efcs-backend `adminservice` stores it in `dbo.ServiceStatus` and
+  fishfind-frontend `stats/Default.aspx` shows it. The heartbeat carries the last station processed (`station 05BH004`). Web host only, not `--console`. Runs only when `RABBITMQ_MANAGEMENT_URL`,
+  `RABBITMQ_USERNAME` and `RABBITMQ_PASSWORD` are set; `STATUS_MACHINE` names the host (in Docker the machine
+  name is the container id). Best-effort: a broker outage is one warning, never a retry loop or a slower start.
 
 ---
 

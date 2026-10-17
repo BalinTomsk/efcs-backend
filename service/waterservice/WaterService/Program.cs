@@ -7,6 +7,7 @@ using Serilog.Events;
 using Serilog.Formatting.Compact;
 using WaterService.Configuration;
 using WaterService.Processing;
+using WaterService.Status;
 using WaterService.Web;
 
 // Load a local .env file as the LOWEST-precedence configuration source, so real environment variables
@@ -63,8 +64,11 @@ static async Task<int> RunWebAsync(
     builder.Services.AddWaterServices(builder.Configuration);
     builder.Services.AddHealthChecks().AddCheck<DbHealthCheck>("db", tags: new[] { "ready" });
     builder.Services.AddHostedService(sp => sp.GetRequiredService<StationWorker>());
+    // Status for the admin page (efcs-backend adminservice). Web host only: a --console run is not "the service".
+    bool statusReporting = builder.Services.AddServiceStatusReporting(builder.Configuration, "waterservice");
 
     WebApplication app = builder.Build();
+    Log.Information("Service status reporting {State}.", statusReporting ? "on" : "off (RABBITMQ_* not set)");
 
     // Lightweight external probe (Docker HEALTHCHECK target): { status, version, uptime }.
     app.MapGet("/health", () => Results.Json(new

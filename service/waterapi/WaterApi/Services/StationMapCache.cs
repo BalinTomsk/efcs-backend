@@ -7,6 +7,8 @@ using WaterApi.Configuration;
 using WaterApi.Data;
 using WaterApi.Domain;
 
+using WaterApi.Status;
+
 namespace WaterApi.Services;
 
 /// <summary>
@@ -38,6 +40,7 @@ public class StationMapCache
     private readonly TimeProvider _time;
     private readonly IReadOnlyList<string> _countries;
 
+    private readonly ServiceActivity? _activity;
     private readonly ConcurrentDictionary<string, StationMapSnapshot> _snapshots = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _locks = new(StringComparer.Ordinal);
 
@@ -46,8 +49,10 @@ public class StationMapCache
         ResiliencePipelineProvider<string> pipelines,
         IOptions<StationCacheOptions> options,
         ILogger<StationMapCache> logger,
-        TimeProvider time)
+        TimeProvider time,
+        ServiceActivity? activity = null)
     {
+        _activity = activity;
         _repository = repository;
         _sqlPipeline = pipelines.GetPipeline(ResiliencePipelines.Sql);
         _options = options.Value;
@@ -115,6 +120,7 @@ public class StationMapCache
             LoadedGauge.WithLabels(country).Set(new DateTimeOffset(snapshot.LoadedUtc).ToUnixTimeSeconds());
             RefreshCounter.WithLabels(country, "success").Inc();
             _logger.LogInformation("Station map cache loaded. country={Country} stations={Count}", country, stations.Count);
+            _activity?.Record($"map {country} {stations.Count} stations");
             return true;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

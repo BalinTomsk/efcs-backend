@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Configuration.EnvironmentVariables;
 using Microsoft.Extensions.Configuration.Memory;
 using NewsIdx.Configuration;
+using NewsIdx.Status;
 using NewsIdx.Embedding;
 using NewsIdx.Indexing;
 using NewsIdx.Search;
@@ -41,6 +42,8 @@ try
     builder.WebHost.UseUrls("http://0.0.0.0:8080", "http://0.0.0.0:8081");
 
     ServiceRegistration.Wiring wiring = builder.Services.AddNewsIdxServices(builder.Configuration);
+    // Status for the admin page (efcs-backend adminservice). Not for a one-shot run: that is not "the service".
+    bool statusReporting = oneShot is null && builder.Services.AddServiceStatusReporting(builder.Configuration, "news_idx");
     IHealthChecksBuilder health = builder.Services.AddHealthChecks();
     health.AddCheck<QdrantHealthCheck>("qdrant", tags: ["ready"]);
     if (wiring.MySql)
@@ -55,6 +58,7 @@ try
     Log.Information("news_idx {Version} starting. articles={Articles} events={Events} qdrant={Qdrant} mode={Mode}",
         AppInfo.Version, wiring.MySql ? "mysql" : "in-memory", wiring.Events ? "rabbitmq" : "off",
         wiring.QdrantUrl, oneShot ?? "service");
+    Log.Information("Service status reporting {State}.", statusReporting ? "on" : "off");
 
     if (oneShot is not null)
     {

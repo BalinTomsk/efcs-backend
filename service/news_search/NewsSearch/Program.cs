@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Configuration.EnvironmentVariables;
 using Microsoft.Extensions.Configuration.Memory;
 using NewsSearch.Configuration;
+using NewsSearch.Status;
 using NewsSearch.Web;
 using Prometheus;
 using Serilog;
@@ -34,6 +35,8 @@ try
     builder.WebHost.UseUrls("http://0.0.0.0:8080", "http://0.0.0.0:8081");
 
     IReadOnlyList<string> sources = builder.Services.AddNewsSearchServices(builder.Configuration);
+    // Status for the admin page (efcs-backend adminservice).
+    bool statusReporting = builder.Services.AddServiceStatusReporting(builder.Configuration, "news_search");
     builder.Services.AddHealthChecks();
     builder.Services.AddControllers();
 
@@ -41,6 +44,7 @@ try
 
     Log.Information("news_search {Version} starting. sources={Sources}", AppInfo.Version,
         sources.Count == 0 ? "none" : string.Join(",", sources));
+    Log.Information("Service status reporting {State}.", statusReporting ? "on" : "off (RABBITMQ_* not set)");
 
     app.UseExceptionHandler();
 

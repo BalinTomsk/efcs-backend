@@ -6,6 +6,16 @@ carries the history.
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-10-16 (not deployed)
+
+### Added
+- **Service status for the admin page.** `Status/ServiceStatusReporter` publishes `fishfind.service-status.v1`
+  (`start`, a `heartbeat` every 60 s, `stop` on a clean shutdown) to `fishfind.servicestatus.events` over the
+  RabbitMQ management HTTP API; efcs-backend `adminservice` stores it in `dbo.ServiceStatus` and
+  fishfind-frontend `stats/Default.aspx` shows it. The heartbeat carries the last event indexed (`upsert article <id>`). Not in a `--sync` one-shot run. Runs only when `RABBITMQ_MANAGEMENT_URL`,
+  `RABBITMQ_USERNAME` and `RABBITMQ_PASSWORD` are set; `STATUS_MACHINE` names the host (in Docker the machine
+  name is the container id). Best-effort: a broker outage is one warning, never a retry loop or a slower start.
+
 ## [0.3.0] — 2026-10-16
 
 ### Added

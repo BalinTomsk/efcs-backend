@@ -213,3 +213,15 @@ dotnet run --project NewsIdx.Tests
 QDRANT_TEST_URL=http://localhost:6334 dotnet run --project NewsIdx.Tests   # + the real-Qdrant BM25 test
 docker compose up -d qdrant ; ./scripts/fetch-model.ps1 ; dotnet run --project NewsIdx --no-launch-profile
 ```
+
+## Service status (admin page)
+
+`Status/ServiceStatusReporter.cs` publishes `fishfind.service-status.v1` to the RabbitMQ queue
+`fishfind.servicestatus.events` (management HTTP API, `POST /api/exchanges/%2F/amq.default/publish`, non-persistent):
+`start` at startup, `heartbeat` every `STATUS_INTERVAL_SECONDS` (60, minimum 10) with the latest `ServiceActivity`,
+`stop` on a clean shutdown (3 s budget). Service name `news_idx`; machine = `STATUS_MACHINE`, else the machine name
+(lower-cased). `NewsEventConsumer` records `<action> article <newsId>` after each applied event; not registered for a `--sync` / `--sync-full` one-shot run. Registered by `AddServiceStatusReporting` only when `RABBITMQ_MANAGEMENT_URL`,
+`RABBITMQ_USERNAME` and `RABBITMQ_PASSWORD` are all set; `ServiceActivity` is always registered and optional for its
+callers. A failed publish logs one warning per outage and is never retried. The contract and the consumer
+(efcs-backend `adminservice` → `dbo.ServiceStatus` → fishfind-frontend `stats/Default.aspx`) are specified in
+`../../adminservice/docs/specification.md`.

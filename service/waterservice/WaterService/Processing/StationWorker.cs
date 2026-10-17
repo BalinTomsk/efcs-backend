@@ -6,6 +6,7 @@ using Serilog.Context;
 using WaterService.Configuration;
 using WaterService.Data;
 using WaterService.Web;
+using WaterService.Status;
 
 namespace WaterService.Processing;
 
@@ -34,6 +35,7 @@ public sealed class StationWorker : BackgroundService
     private readonly WaterMetrics _metrics;
     private readonly WorkerOptions _options;
     private readonly ILogger<StationWorker> _log;
+    private readonly ServiceActivity? _activity;
     private readonly CronExpression _cron;
 
     // The CA and US schedules each post-process after their pass; never let the two run the procs at once.
@@ -47,8 +49,10 @@ public sealed class StationWorker : BackgroundService
         StationHttp503BackoffService http503Backoff,
         WaterMetrics metrics,
         IOptions<WorkerOptions> options,
-        ILogger<StationWorker> log)
+        ILogger<StationWorker> log,
+        ServiceActivity? activity = null)
     {
+        _activity = activity;
         _repo = repo;
         _processorCA = processorCA;
         _processorUS = processorUS;
@@ -495,13 +499,16 @@ public sealed class StationWorker : BackgroundService
         return new PassStats(country, succeeded, failed, lastProcessedStation, lastFailedStation);
     }
 
-    private Task<ProcessingOutcome> ProcessStationAsync(string country, string mli, string state, int tz, CancellationToken ct) =>
-        country switch
+    private Task<ProcessingOutcome> ProcessStationAsync(string country, string mli, string state, int tz, CancellationToken ct)
+    {
+        _activity?.Record("station " + mli);
+        return country switch
         {
             "CA" => _processorCA.ProcessWithOutcomeAsync(mli, state, tz, ct),
             "US" => _processorUS.ProcessWithOutcomeAsync(mli, state, tz, ct),
             _ => throw new ArgumentException("Unsupported country " + country, nameof(country)),
         };
+    }
 
     private static string ProviderFor(string country) =>
         country switch

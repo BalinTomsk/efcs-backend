@@ -7,6 +7,7 @@ using Serilog.Formatting.Compact;
 using WeatherService.Configuration;
 using WeatherService.Processing;
 using WeatherService.Reporting;
+using WeatherService.Status;
 using WeatherService.Web;
 
 // Load a local .env file as the LOWEST-precedence configuration source, so real environment variables
@@ -76,8 +77,11 @@ static async Task<int> RunWebAsync(
     builder.Services.AddHostedService(sp => sp.GetRequiredService<ServiceLifecycleTracker>());
     builder.Services.AddHostedService(sp => sp.GetRequiredService<StationWorker>());
     builder.Services.AddHostedService(sp => sp.GetRequiredService<WeeklyReportMailService>());
+    // Status for the admin page (efcs-backend adminservice). Web host only: a --console run is not "the service".
+    bool statusReporting = builder.Services.AddServiceStatusReporting(builder.Configuration, "weather");
 
     WebApplication app = builder.Build();
+    Log.Information("Service status reporting {State}.", statusReporting ? "on" : "off (RABBITMQ_* not set)");
 
     // Paths mirror Spring Actuator's, so the Docker HEALTHCHECK and any external monitoring are
     // identical across the two implementations.
