@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Microsoft.Extensions.Options;
 using NewsSearch.Configuration;
+using NewsSearch.Status;
 using Prometheus;
 
 namespace NewsSearch.Sources;
@@ -18,9 +19,11 @@ public sealed class SearchService
 
     private readonly IReadOnlyDictionary<string, ISearchSource> _sources;
     private readonly SearchOptions _options;
+    private readonly ServiceActivity? _activity;
 
-    public SearchService(IEnumerable<ISearchSource> sources, IOptions<NewsSearchOptions> options)
+    public SearchService(IEnumerable<ISearchSource> sources, IOptions<NewsSearchOptions> options, ServiceActivity? activity = null)
     {
+        _activity = activity;
         _sources = sources.ToDictionary(s => s.Name, StringComparer.OrdinalIgnoreCase);
         _options = options.Value.Search;
     }
@@ -35,6 +38,7 @@ public sealed class SearchService
         }
 
         SearchRequest request = Validate(query, limit, country);
+        _activity?.Record("search " + s.Name);  // the source only: a query is the visitor's, not the admin page's
         var watch = Stopwatch.StartNew();
         try
         {

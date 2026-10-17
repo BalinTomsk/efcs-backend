@@ -8,6 +8,7 @@ using Serilog;
 using Serilog.Events;
 using Serilog.Formatting.Compact;
 using WaterApi.Configuration;
+using WaterApi.Status;
 using WaterApi.Web;
 
 // Load a local .env file as the LOWEST-precedence configuration source, so real environment variables
@@ -36,6 +37,8 @@ try
     builder.WebHost.UseUrls("http://0.0.0.0:8080", "http://0.0.0.0:8081");
 
     bool useSql = builder.Services.AddWaterApiServices(builder.Configuration);
+    // Status for the admin page (efcs-backend adminservice).
+    bool statusReporting = builder.Services.AddServiceStatusReporting(builder.Configuration, "waterapi");
     IHealthChecksBuilder health = builder.Services.AddHealthChecks();
     if (useSql)
     {
@@ -60,6 +63,7 @@ try
     app.UseResponseCompression();
 
     Log.Information("waterapi {Version} starting. storage={Storage}", AppInfo.Version, useSql ? "sql" : "in-memory");
+    Log.Information("Service status reporting {State}.", statusReporting ? "on" : "off (RABBITMQ_* not set)");
 
     // Split the two surfaces by the port the connection ARRIVED on, never by the Host header. The Host
     // header carries whatever port the caller dialled: behind Docker's 8090->8080 mapping that is 8090, so
@@ -135,6 +139,7 @@ static void ConfigureSerilog(LoggerConfiguration cfg) => cfg
     .MinimumLevel.Information()
     .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
     .MinimumLevel.Override("Microsoft.Hosting.Lifetime", LogEventLevel.Information)
+    .MinimumLevel.Override("System.Net.Http.HttpClient", LogEventLevel.Warning)
     .MinimumLevel.Override("Polly", LogEventLevel.Error)
     .Enrich.FromLogContext()
     .Enrich.WithProperty("service", "waterapi")

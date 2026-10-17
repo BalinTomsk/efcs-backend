@@ -2,6 +2,18 @@
 
 All notable changes for this service must be recorded in this file.
 
+## [Unreleased]
+
+## [10.3.0] — 2026-10-16 (not deployed)
+
+### Added
+- **Service status for the admin page.** `Status/ServiceStatusReporter` publishes `fishfind.service-status.v1`
+  (`start`, a `heartbeat` every 60 s, `stop` on a clean shutdown) to `fishfind.servicestatus.events` over the
+  RabbitMQ management HTTP API; efcs-backend `adminservice` stores it in `dbo.ServiceStatus` and
+  fishfind-frontend `stats/Default.aspx` shows it. The heartbeat carries the last provider + station (`OpenMeteo station 123`). Web host only, not `--console`. Runs only when `RABBITMQ_MANAGEMENT_URL`,
+  `RABBITMQ_USERNAME` and `RABBITMQ_PASSWORD` are set; `STATUS_MACHINE` names the host (in Docker the machine
+  name is the container id). Best-effort: a broker outage is one warning, never a retry loop or a slower start.
+
 ## [10.2.0] - 2026-08-14
 
 - **weather.gov now fetches the GRIDPOINT FORECAST instead of the latest observation**, so it finally

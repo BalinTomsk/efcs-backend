@@ -2,6 +2,7 @@ using Microsoft.Extensions.Options;
 using NewsIdx.Configuration;
 using NewsIdx.Domain;
 using NewsIdx.Indexing;
+using NewsIdx.Status;
 using Prometheus;
 
 namespace NewsIdx.Messaging;
@@ -29,11 +30,13 @@ public sealed class NewsEventConsumer : BackgroundService
     private readonly IndexBootstrap _bootstrap;
     private readonly EventOptions _options;
     private readonly ILogger<NewsEventConsumer> _logger;
+    private readonly ServiceActivity? _activity;
 
     public NewsEventConsumer(
         IMessageQueue queue, NewsIndexer indexer, IndexBootstrap bootstrap,
-        IOptions<NewsIdxOptions> options, ILogger<NewsEventConsumer> logger)
+        IOptions<NewsIdxOptions> options, ILogger<NewsEventConsumer> logger, ServiceActivity? activity = null)
     {
+        _activity = activity;
         _queue = queue;
         _indexer = indexer;
         _bootstrap = bootstrap;
@@ -105,6 +108,7 @@ public sealed class NewsEventConsumer : BackgroundService
             {
                 await _indexer.IndexAsync(evt.NewsId, cancellationToken).ConfigureAwait(false);
                 Events.WithLabels("applied").Inc();
+                _activity?.Record($"{evt.Action} article {evt.NewsId}");
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

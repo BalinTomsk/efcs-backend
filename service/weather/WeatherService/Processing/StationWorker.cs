@@ -5,6 +5,7 @@ using WeatherService.Configuration;
 using WeatherService.Data;
 using WeatherService.Domain;
 using WeatherService.Reporting;
+using WeatherService.Status;
 
 namespace WeatherService.Processing;
 
@@ -77,6 +78,7 @@ public class StationWorker : BackgroundService
     private readonly WeatherStationCoverageRepository _coverageRepository;
     private readonly WorkerOptions _options;
     private readonly ILogger<StationWorker> _log;
+    private readonly ServiceActivity? _activity;
 
     public StationWorker(
         WeatherStationRepository stationRepository,
@@ -91,8 +93,10 @@ public class StationWorker : BackgroundService
         WeatherApiUsageTracker usageTracker,
         WeatherStationCoverageRepository coverageRepository,
         IOptions<WorkerOptions> options,
-        ILogger<StationWorker> log)
+        ILogger<StationWorker> log,
+        ServiceActivity? activity = null)
     {
+        _activity = activity;
         _stationRepository = stationRepository;
         _stationProcessorOpen = stationProcessorOpen;
         _stationProcessorWeatherGov = stationProcessorWeatherGov;
@@ -279,6 +283,7 @@ public class StationWorker : BackgroundService
             }
 
             long startedAt = CurrentTimeMillis();
+            _activity?.Record(worker.Provider + " station " + station.Mli);
             ProcessingOutcome outcome = await ProcessorFor(worker).ProcessAsync(station, country, ct)
                 .ConfigureAwait(false);
 
