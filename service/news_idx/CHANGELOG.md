@@ -6,6 +6,11 @@ carries the history.
 
 ## [Unreleased]
 
+### Changed
+- **`STATUS_INTERVAL_SECONDS` (env file): heartbeat period, minimum 60 s** (was a 10 s floor). Lower values are raised
+  to 60, so a service never reports to RabbitMQ more often than once a minute; larger values cut traffic further (then
+  raise the page's `ServiceStatusDeadAfterSeconds` to at least 3x). Default unchanged: 60.
+
 ## [0.4.0] — 2026-10-16 (not deployed)
 
 ### Added

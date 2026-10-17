@@ -26,7 +26,10 @@ public sealed class StatusOptions
     /// <summary>Cap on the queue (<c>x-max-length</c>, oldest dropped first).</summary>
     public int MaxQueueLength { get; set; } = 10_000;
 
-    /// <summary>How often adminservice writes its own heartbeat row (it does not go through the queue).</summary>
+    /// <summary>
+    /// How often adminservice writes its own heartbeat row (it does not go through the queue). Minimum 60;
+    /// <c>STATUS_INTERVAL_SECONDS</c> in the env file overrides it, as for every publisher.
+    /// </summary>
     public int HeartbeatSeconds { get; set; } = 60;
 
     /// <summary>

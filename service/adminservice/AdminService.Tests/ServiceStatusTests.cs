@@ -144,6 +144,16 @@ public class ServiceStatusTests
     }
 
     [Test]
+    public async Task Interval_NeverBelowOneMinute_EnvWinsOverOption()
+    {
+        await Assert.That(SelfStatusReporter.IntervalSeconds(null, 60)).IsEqualTo(60);
+        await Assert.That(SelfStatusReporter.IntervalSeconds(null, 10)).IsEqualTo(60);
+        await Assert.That(SelfStatusReporter.IntervalSeconds(15, 300)).IsEqualTo(60);
+        await Assert.That(SelfStatusReporter.IntervalSeconds(300, 60)).IsEqualTo(300);
+        await Assert.That(SelfStatusReporter.IntervalSeconds(null, 120)).IsEqualTo(120);
+    }
+
+    [Test]
     public async Task MachineName_UsesConfiguredName_LowerCased()
     {
         await Assert.That(SelfStatusReporter.MachineName(" CSNode ")).IsEqualTo("csnode");
