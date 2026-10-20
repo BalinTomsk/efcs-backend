@@ -100,34 +100,14 @@ public sealed class ServiceStatusReporter : BackgroundService
     internal string Body(string evt, DateTime sentUtc)
     {
         (DateTime? lastUtc, string? last) = _activity.Last;
-        return JsonSerializer.Serialize(new
-        {
-            type = MessageType,
-            @event = evt,
-            service = _service,
-            machine = _machine,
-            version = AppInfo.Version,
-            processStartUtc = AppInfo.StartedUtc.ToString("O"),
-            sentUtc = sentUtc.ToString("O"),
-            lastActionUtc = lastUtc?.ToString("O"),
-            lastAction = last,
-        });
+        return ServiceStatusMessages.Body(evt, _service, _machine, AppInfo.Version, AppInfo.StartedUtc, sentUtc, lastUtc, last);
     }
 
     private async Task PublishAsync(string evt, CancellationToken cancellationToken)
     {
         try
         {
-            var envelope = new
-            {
-                properties = new { delivery_mode = 1, content_type = "application/json" },
-                routing_key = Queue,
-                payload = Body(evt, DateTime.UtcNow),
-                payload_encoding = "string",
-            };
-            using HttpResponseMessage response = await _http.PostAsJsonAsync(
-                "api/exchanges/%2F/amq.default/publish", envelope, cancellationToken).ConfigureAwait(false);
-            response.EnsureSuccessStatusCode();
+            await ServiceStatusMessages.PublishAsync(_http, Body(evt, DateTime.UtcNow), cancellationToken).ConfigureAwait(false);
             _warned = false;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
@@ -139,6 +119,43 @@ public sealed class ServiceStatusReporter : BackgroundService
                 _warned = true;
             }
         }
+    }
+}
+
+/// <summary>
+/// The <c>fishfind.service-status.v1</c> message and its transport, shared by this process's own reporter and
+/// <see cref="QdrantStatusReporter"/>, which reports Qdrant on its behalf.
+/// </summary>
+public static class ServiceStatusMessages
+{
+    internal static string Body(string evt, string service, string machine, string version, DateTime processStartUtc,
+        DateTime sentUtc, DateTime? lastActionUtc, string? lastAction) =>
+        JsonSerializer.Serialize(new
+        {
+            type = ServiceStatusReporter.MessageType,
+            @event = evt,
+            service,
+            machine,
+            version,
+            processStartUtc = processStartUtc.ToString("O"),
+            sentUtc = sentUtc.ToString("O"),
+            lastActionUtc = lastActionUtc?.ToString("O"),
+            lastAction,
+        });
+
+    /// <summary>Publishes one message; throws on failure (callers log once per outage).</summary>
+    internal static async Task PublishAsync(HttpClient http, string payload, CancellationToken cancellationToken)
+    {
+        var envelope = new
+        {
+            properties = new { delivery_mode = 1, content_type = "application/json" },
+            routing_key = ServiceStatusReporter.Queue,
+            payload,
+            payload_encoding = "string",
+        };
+        using HttpResponseMessage response = await http.PostAsJsonAsync(
+            "api/exchanges/%2F/amq.default/publish", envelope, cancellationToken).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
     }
 }
 
@@ -161,9 +178,13 @@ public static class ServiceStatusRegistration
     /// <c>RABBITMQ_MANAGEMENT_URL</c>, <c>RABBITMQ_USERNAME</c> and <c>RABBITMQ_PASSWORD</c> are all set.
     /// <c>STATUS_MACHINE</c> names the host (inside Docker the machine name is the container id).
     /// <c>STATUS_INTERVAL_SECONDS</c> sets the heartbeat period (default and minimum 60).
+    /// With <paramref name="qdrantGrpcUrl"/>, also registers <see cref="QdrantStatusReporter"/>, so the page lists
+    /// Qdrant (which cannot publish itself) on the same machine. Its REST endpoint is <c>QDRANT_REST_URL</c>, or
+    /// the gRPC URL with port 6334 swapped for 6333.
     /// </summary>
     /// <returns><c>true</c> when the reporter runs.</returns>
-    public static bool AddServiceStatusReporting(this IServiceCollection services, IConfiguration configuration, string service)
+    public static bool AddServiceStatusReporting(this IServiceCollection services, IConfiguration configuration, string service,
+        string? qdrantGrpcUrl = null)
     {
         services.AddSingleton<ServiceActivity>();
 
@@ -178,15 +199,44 @@ public static class ServiceStatusRegistration
         string machine = (NullIfBlank(configuration["STATUS_MACHINE"]) ?? Environment.MachineName).ToLowerInvariant();
         int seconds = ReportIntervalSeconds(configuration.GetValue("STATUS_INTERVAL_SECONDS", MinIntervalSeconds));
         services.AddSingleton(new ServiceStatusSettings(service, machine, TimeSpan.FromSeconds(seconds)));
-        services.AddHttpClient<ServiceStatusReporter>(http =>
+        void Broker(HttpClient http)
         {
             http.BaseAddress = new Uri(url.TrimEnd('/') + "/");
             http.Timeout = TimeSpan.FromSeconds(5);
             http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
                 "Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{user}:{password}")));
-        });
+        }
+        services.AddHttpClient<ServiceStatusReporter>(Broker);
         services.AddHostedService(sp => sp.GetRequiredService<ServiceStatusReporter>());
+
+        if (qdrantGrpcUrl is not null)
+        {
+            string rest = NullIfBlank(configuration["QDRANT_REST_URL"]) ?? QdrantRestUrl(qdrantGrpcUrl);
+            string? apiKey = NullIfBlank(configuration["QDRANT_API_KEY"]);
+            services.AddHttpClient(QdrantStatusReporter.QdrantClientName, http =>
+            {
+                http.BaseAddress = new Uri(rest.TrimEnd('/') + "/");
+                http.Timeout = TimeSpan.FromSeconds(5);
+                if (apiKey is not null)
+                {
+                    http.DefaultRequestHeaders.Add("api-key", apiKey);
+                }
+            });
+            services.AddHttpClient(QdrantStatusReporter.BrokerClientName, Broker);
+            services.AddHostedService<QdrantStatusReporter>();
+        }
         return true;
+    }
+
+    /// <summary>Qdrant's REST endpoint next to its gRPC one: same host, port 6334 → 6333.</summary>
+    internal static string QdrantRestUrl(string grpcUrl)
+    {
+        var uri = new UriBuilder(grpcUrl);
+        if (uri.Port == 6334)
+        {
+            uri.Port = 6333;
+        }
+        return uri.Uri.ToString();
     }
 
     private static string? NullIfBlank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

@@ -42,8 +42,9 @@ try
     builder.WebHost.UseUrls("http://0.0.0.0:8080", "http://0.0.0.0:8081");
 
     ServiceRegistration.Wiring wiring = builder.Services.AddNewsIdxServices(builder.Configuration);
-    // Status for the admin page (efcs-backend adminservice). Not for a one-shot run: that is not "the service".
-    bool statusReporting = oneShot is null && builder.Services.AddServiceStatusReporting(builder.Configuration, "news_idx");
+    // Status for the admin page (efcs-backend adminservice), for news_idx and, on its behalf, Qdrant. Not for a
+    // one-shot run: that is not "the service".
+    bool statusReporting = oneShot is null && builder.Services.AddServiceStatusReporting(builder.Configuration, "news_idx", wiring.QdrantUrl);
     IHealthChecksBuilder health = builder.Services.AddHealthChecks();
     health.AddCheck<QdrantHealthCheck>("qdrant", tags: ["ready"]);
     if (wiring.MySql)

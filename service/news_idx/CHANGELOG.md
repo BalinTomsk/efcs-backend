@@ -6,6 +6,15 @@ carries the history.
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-10-20
+
+### Added
+- **Qdrant on the admin status page.** `Status/QdrantStatusReporter` reads Qdrant's `/telemetry` every heartbeat
+  and publishes service `qdrant` (Qdrant's own version and start time) on news_idx's machine. Qdrant cannot
+  publish itself, and on 2026-10-20 it was down for an hour after a CTRL reboot without the page showing it.
+  Nothing is sent while Qdrant is down, so the page marks it dead. REST endpoint: `QDRANT_REST_URL`, else the
+  gRPC URL with port 6333.
+
 ### Changed
 - **`STATUS_INTERVAL_SECONDS` (env file): heartbeat period, minimum 60 s** (was a 10 s floor). Lower values are raised
   to 60, so a service never reports to RabbitMQ more often than once a minute; larger values cut traffic further (then

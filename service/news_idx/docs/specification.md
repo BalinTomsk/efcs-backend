@@ -218,10 +218,18 @@ docker compose up -d qdrant ; ./scripts/fetch-model.ps1 ; dotnet run --project N
 
 `Status/ServiceStatusReporter.cs` publishes `fishfind.service-status.v1` to the RabbitMQ queue
 `fishfind.servicestatus.events` (management HTTP API, `POST /api/exchanges/%2F/amq.default/publish`, non-persistent):
-`start` at startup, `heartbeat` every `STATUS_INTERVAL_SECONDS` (60, minimum 10) with the latest `ServiceActivity`,
+`start` at startup, `heartbeat` every `STATUS_INTERVAL_SECONDS` (60, minimum 60) with the latest `ServiceActivity`,
 `stop` on a clean shutdown (3 s budget). Service name `news_idx`; machine = `STATUS_MACHINE`, else the machine name
 (lower-cased). `NewsEventConsumer` records `<action> article <newsId>` after each applied event; not registered for a `--sync` / `--sync-full` one-shot run. Registered by `AddServiceStatusReporting` only when `RABBITMQ_MANAGEMENT_URL`,
 `RABBITMQ_USERNAME` and `RABBITMQ_PASSWORD` are all set; `ServiceActivity` is always registered and optional for its
 callers. A failed publish logs one warning per outage and is never retried. The contract and the consumer
 (efcs-backend `adminservice` → `dbo.ServiceStatus` → fishfind-frontend `stats/Default.aspx`) are specified in
 `../../adminservice/docs/specification.md`.
+
+**Qdrant's row.** Qdrant cannot publish, so `Status/QdrantStatusReporter.cs` reports it on news_idx's behalf
+(registered with the reporter above, same broker and interval). Each interval it reads Qdrant's REST
+`GET /telemetry?details_level=0` (`QDRANT_REST_URL`, else `QDRANT_URL` with port 6334 → 6333; `QDRANT_API_KEY` as
+the `api-key` header) and, while Qdrant answers, publishes service `qdrant` on the same machine with Qdrant's own
+`result.app.version` and `result.app.startup` as `processStartUtc` (a new start time = a restart on the page).
+Event `start` for a Qdrant process not reported yet, else `heartbeat`; never `stop` (a clean shutdown cannot be
+told from a crash). While Qdrant is down nothing is sent, so the page shows it dead. `lastAction` is null.
