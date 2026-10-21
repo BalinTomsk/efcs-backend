@@ -23,10 +23,13 @@ public sealed record SearchRequest(string Query, int Limit, string? Country);
 
 /// <summary>
 /// One article, in the shape every source returns, so the page can merge them. <c>Score</c> is the source's
-/// own relevance (cosine for vector, BM25 for bm25), comparable only within one source.
+/// own relevance (cosine for vector, BM25 for bm25), comparable only within one source. <c>Relevance</c> is a
+/// percent 0..100 the page can sort and show across sources; <c>Missing</c> lists the query words the article does
+/// not contain (null = unknown).
 /// </summary>
 public sealed record SearchHit(
-    string NewsId, string Title, string? Source, string? Country, string? Date, double Score, string? Snippet, string? LakeId);
+    string NewsId, string Title, string? Source, string? Country, string? Date, double Score, string? Snippet, string? LakeId,
+    int? Relevance = null, IReadOnlyList<string>? Missing = null);
 
 /// <summary>The source's backend failed, timed out or has its breaker open (→ HTTP 503).</summary>
 public sealed class SourceUnavailableException(string source, string message, Exception? inner = null)

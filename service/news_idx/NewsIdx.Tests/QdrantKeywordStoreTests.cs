@@ -58,6 +58,13 @@ public class QdrantKeywordStoreTests
             await Assert.That(us.Single().Title).IsEqualTo("Bass derby");
             await Assert.That(versions.Count).IsEqualTo(3);
             await Assert.That(after).IsEqualTo(2UL);
+
+            IReadOnlyDictionary<string, uint[]> terms = await store.GetTermsAsync(
+                [articles[0].NewsId, articles[1].NewsId], CancellationToken.None);
+            uint walleye = Bm25Encoder.Hash(PorterStemmer.Stem("walleye"));
+            await Assert.That(terms.Keys).IsEquivalentTo(new[] { articles[0].NewsId }); // [1] was deleted above
+            await Assert.That(terms[articles[0].NewsId]).Contains(walleye);
+            await Assert.That(terms[articles[0].NewsId].SequenceEqual(terms[articles[0].NewsId].Order())).IsTrue();
         }
         finally
         {

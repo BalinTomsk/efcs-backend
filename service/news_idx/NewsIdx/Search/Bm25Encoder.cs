@@ -106,6 +106,29 @@ public sealed class Bm25Encoder
     }
 
     /// <summary>
+    /// The query's searchable words, once per term, with the term's sparse index: what "Missing: ..." is checked
+    /// against. Stop words are left out (they are never indexed). The word is shown as typed, lower-cased.
+    /// </summary>
+    public static IReadOnlyList<(string Word, uint Term)> QueryWords(string query)
+    {
+        var seen = new HashSet<uint>();
+        var words = new List<(string, uint)>();
+        foreach ((string word, _) in Words(query))
+        {
+            if (StopWords.Contains(word))
+            {
+                continue;
+            }
+            uint term = Hash(PorterStemmer.Stem(word));
+            if (seen.Add(term))
+            {
+                words.Add((word, term));
+            }
+        }
+        return words;
+    }
+
+    /// <summary>
     /// Where the first word of <paramref name="text"/> matching a query term starts, or -1. Used to centre the
     /// snippet on the match instead of the article's first line.
     /// </summary>

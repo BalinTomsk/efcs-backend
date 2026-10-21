@@ -168,6 +168,17 @@ internal sealed class FakeKeywordStore : IKeywordStore
         Task.FromResult<IReadOnlyDictionary<string, DateTime>>(Docs.ToDictionary(d => d.Key,
             d => DateTimeOffset.FromUnixTimeSeconds(new DateTimeOffset(d.Value.Article.LastEditUtc).ToUnixTimeSeconds()).UtcDateTime));
 
+    public Exception? TermsFailure { get; set; }
+
+    public Task<IReadOnlyDictionary<string, uint[]>> GetTermsAsync(IReadOnlyCollection<string> newsIds, CancellationToken cancellationToken)
+    {
+        if (TermsFailure is not null) throw TermsFailure;
+        return Task.FromResult<IReadOnlyDictionary<string, uint[]>>(newsIds
+            .Select(NewsIds.Normalize)
+            .Where(Docs.ContainsKey)
+            .ToDictionary(id => id, id => Docs[id].Terms.Indices.Order().ToArray()));
+    }
+
     public Task<IReadOnlyList<KeywordHit>> SearchAsync(SparseTerms query, int limit, string? country, CancellationToken cancellationToken)
     {
         int n = Docs.Count;

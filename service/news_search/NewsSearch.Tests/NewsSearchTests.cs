@@ -17,7 +17,7 @@ public class NewsSearchTests
 {
     private const string NewsIdxAnswer = """
         {"data":{"query":"walleye","country":null,"count":2,"items":[
-          {"newsId":"a1","title":"Walleye limits","source":"CTV","country":"CA","date":"2026-09-01","score":0.81,"snippet":"…","lakeId":null},
+          {"newsId":"a1","title":"Walleye limits","source":"CTV","country":"CA","date":"2026-09-01","score":0.81,"snippet":"…","lakeId":null,"relevance":81,"missing":["regulations"]},
           {"newsId":"b2","title":"Bass derby","source":null,"country":"US","date":"2026-08-02","score":0.62,"snippet":null,"lakeId":"l1"}]},
          "error":null,"meta":{}}
         """;
@@ -31,6 +31,10 @@ public class NewsSearchTests
         await Assert.That(hits[0].NewsId).IsEqualTo("a1");
         await Assert.That(hits[0].Score).IsEqualTo(0.81);
         await Assert.That(hits[1].LakeId).IsEqualTo("l1");
+        await Assert.That(hits[0].Relevance).IsEqualTo(81);
+        await Assert.That(hits[0].Missing!).IsEquivalentTo(new[] { "regulations" });
+        await Assert.That(hits[1].Relevance).IsNull();   // an older news_idx sends neither field
+        await Assert.That(hits[1].Missing).IsNull();
     }
 
     [Test]

@@ -30,8 +30,11 @@ C# / .NET 10, built like `../waterapi` (same host skeleton, `{data,error,meta}` 
 
 ### `GET /api/v1/newssearch/{source}?q={text}[&limit=10][&country=CA]`
 - `q` required, ≤ 256 chars; `limit` 1..50 (default 10); `country` optional two letters.
-- `data`: `{ source, query, country, count, tookMs, items:[{ newsId, title, source, country, date, score, snippet, lakeId }] }`.
+- `data`: `{ source, query, country, count, tookMs, items:[{ newsId, title, source, country, date, score, snippet, lakeId, relevance, missing }] }`.
   The items have the same shape for every source, so the page can merge them. `score` is only comparable within one source.
+  `relevance` (0..100) is the score as a percent (vector: cosine x 100; bm25: share of the query's best hit), and the
+  page sorts all sources by it. `missing` lists the query words the article does not contain. Both come from news_idx
+  0.6.0+ and are null with an older one.
 - Errors: 400 `invalid_request`; 404 `not_found` (unknown source); **503 `unavailable`** + `Retry-After: 30`
   (the source's backend is down, slow or behind an open breaker; the page then shows the other sources).
 

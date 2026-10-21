@@ -152,6 +152,36 @@ public sealed class QdrantKeywordStore : IKeywordStore
         return versions;
     }
 
+    public async Task<IReadOnlyDictionary<string, uint[]>> GetTermsAsync(
+        IReadOnlyCollection<string> newsIds, CancellationToken cancellationToken)
+    {
+        var terms = new Dictionary<string, uint[]>(StringComparer.Ordinal);
+        if (newsIds.Count == 0)
+        {
+            return terms;
+        }
+
+        List<PointId> ids = newsIds.Select(id => (PointId)NewsIds.PointId(id, 0)).ToList();
+        var payload = new WithPayloadSelector { Include = new PayloadIncludeSelector { Fields = { "news_id" } } };
+        var vectors = new WithVectorsSelector { Include = new VectorsSelector { Names = { VectorName } } };
+        IReadOnlyList<RetrievedPoint> points = await Run(ct => new ValueTask<IReadOnlyList<RetrievedPoint>>(
+            _client.RetrieveAsync(_collection, ids, payload, vectors, cancellationToken: ct)), cancellationToken);
+
+        foreach (RetrievedPoint p in points)
+        {
+            if (p.Payload.TryGetValue("news_id", out Value? id)
+                && p.Vectors?.Vectors?.Vectors.TryGetValue(VectorName, out VectorOutput? v) == true)
+            {
+                terms[id.StringValue] = SparseIndices(v).Order().ToArray();
+            }
+        }
+        return terms;
+    }
+
+    /// <summary>The indices of a stored sparse vector (the newer <c>sparse</c> field, else the legacy one).</summary>
+    private static IEnumerable<uint> SparseIndices(VectorOutput v) =>
+        v.Sparse is { } sparse ? sparse.Indices : v.Indices?.Data ?? Enumerable.Empty<uint>();
+
     public async Task<IReadOnlyList<KeywordHit>> SearchAsync(
         SparseTerms query, int limit, string? country, CancellationToken cancellationToken)
     {

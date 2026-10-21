@@ -4,6 +4,13 @@ All notable changes to `news_search`. Say **why**, not only what.
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-10-20
+
+### Added
+- `relevance` (0..100) and `missing` (query words the article lacks) on each item, passed through from news_idx
+  0.6.0. The portal shows them as a percent badge and a "Missing: ..." line, and sorts both engines' hits by
+  percent. Both are null when news_idx is older than 0.6.0.
+
 ## [0.3.1] — 2026-10-17 (not deployed)
 
 ### Changed

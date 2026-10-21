@@ -181,6 +181,14 @@ Errors (envelope `error.code`): 400 `invalid_request`; 503 `unavailable` (Qdrant
 Same parameters, validation, errors and answer shape as `/search`. Ranked by BM25 (§7a), one hit per
 article. `score` is the BM25 score: unbounded, and not comparable with cosine.
 
+### `relevance` and `missing` (both endpoints, 0.6.0+)
+
+- `relevance` (int 0..100): vector = cosine x 100, clamped; bm25 = `score / best score of this query` x 100 (the best
+  hit is 100). Items stay ordered best first.
+- `missing` (string array or null): the query's words, minus stop words, once per stem, as typed (lower case,
+  accents folded), that the article's stored BM25 terms (title + paragraphs + captions) lack. `[]` = all found;
+  `null` = unknown (the article is not in the BM25 index, or the term lookup failed; the search still answers).
+
 ### `GET /health` — `{ status, version, uptime }` (Docker HEALTHCHECK target)
 
 ## 11. Management (port 8081 — never publish)
