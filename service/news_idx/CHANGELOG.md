@@ -6,6 +6,23 @@ carries the history.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-10-20
+
+### Added
+- **Runs as a Windows service** (`Microsoft.Extensions.Hosting.WindowsServices`, `UseWindowsService`, service name
+  `news_idx`). On 2026-10-20 CTRL rebooted twice, and search stayed down until someone signed in, because Rancher
+  Desktop is a per-user app. A service starts at boot with nobody signed in. It is a no-op in Docker and under
+  `dotnet run`. Plan and cutover steps: `docs/windows-services-plan.md`.
+- **`NewsIdx__ManagementUrl`** (default `http://0.0.0.0:8081`) narrows the management listener's host. In Docker,
+  8081 is never published, but on bare Windows it would sit on the LAN, so CTRL sets `http://127.0.0.1:8081`. Only
+  the host can change: any other port, scheme or path is refused at startup, because the public/management split
+  is made by the port a connection arrived on.
+
+### Changed
+- As a Windows service, the process first moves to its own folder (`AppContext.BaseDirectory`). A service starts in
+  `C:\Windows\System32`, and `logs/`, `models/` and a relative `DOTENV_PATH` mean "next to the executable", as
+  in the container's `/app`.
+
 ## [0.4.1] — 2026-10-20
 
 ### Added

@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Configuration.EnvironmentVariables;
 using Microsoft.Extensions.Configuration.Memory;
+using Microsoft.Extensions.Hosting.WindowsServices;
 using NewsIdx.Configuration;
 using NewsIdx.Status;
 using NewsIdx.Embedding;
@@ -11,6 +12,13 @@ using Prometheus;
 using Serilog;
 using Serilog.Events;
 using Serilog.Formatting.Compact;
+
+// A Windows service starts in C:\Windows\System32. The relative paths (logs/, models/, a relative DOTENV_PATH)
+// mean "next to the executable", as in the container's /app, so move there before anything reads them.
+if (WindowsServiceHelpers.IsWindowsService())
+{
+    Directory.SetCurrentDirectory(AppContext.BaseDirectory);
+}
 
 // Load a local .env file as the LOWEST-precedence configuration source, so real environment variables and
 // appsettings always win (production mounts the env file and points DOTENV_PATH at it). enc:v1: values are
@@ -37,9 +45,13 @@ try
     builder.Configuration.Sources.Insert(0, new MemoryConfigurationSource { InitialData = dotenv });
     AddDecryptedEnvironment(builder.Configuration, decryptedEnv);
     builder.Services.AddSerilog(ConfigureSerilog);
+    // Service Control Manager start/stop on CTRL; does nothing in Docker or under `dotnet run`.
+    builder.Host.UseWindowsService(o => o.ServiceName = "news_idx");
 
     // Public API + /health on 8080; metrics/liveness/readiness/admin on private 8081 (never publish it).
-    builder.WebHost.UseUrls("http://0.0.0.0:8080", "http://0.0.0.0:8081");
+    // NewsIdx__ManagementUrl narrows the 8081 bind: in Docker it is never published, but on bare Windows
+    // (CTRL) set http://127.0.0.1:8081 so it never reaches the LAN.
+    builder.WebHost.UseUrls("http://0.0.0.0:8080", ManagementUrl(builder.Configuration));
 
     ServiceRegistration.Wiring wiring = builder.Services.AddNewsIdxServices(builder.Configuration);
     // Status for the admin page (efcs-backend adminservice), for news_idx and, on its behalf, Qdrant. Not for a
@@ -163,6 +175,30 @@ public partial class Program
 {
     /// <summary>The private management port (never published).</summary>
     internal const int ManagementPort = 8081;
+
+    internal const string DefaultManagementUrl = "http://0.0.0.0:8081";
+
+    /// <summary>
+    /// The management listener, <c>NewsIdx:ManagementUrl</c> (default <see cref="DefaultManagementUrl"/>). Only the
+    /// host may change: the port stays <see cref="ManagementPort"/>, because the public/management split is made by
+    /// the port a connection arrived on.
+    /// </summary>
+    internal static string ManagementUrl(IConfiguration configuration)
+    {
+        string? value = configuration["NewsIdx:ManagementUrl"];
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return DefaultManagementUrl;
+        }
+
+        if (!Uri.TryCreate(value.Trim(), UriKind.Absolute, out Uri? uri) || uri.Scheme != Uri.UriSchemeHttp
+            || uri.Port != ManagementPort || uri.AbsolutePath != "/")
+        {
+            throw new InvalidOperationException(
+                $"NewsIdx:ManagementUrl must be http://<host>:{ManagementPort}; got '{value}'.");
+        }
+        return $"http://{uri.Host}:{ManagementPort}";
+    }
 
     private static readonly HashSet<string> ManagementPaths =
         new(StringComparer.OrdinalIgnoreCase) { "/health/live", "/health/ready", "/metrics" };

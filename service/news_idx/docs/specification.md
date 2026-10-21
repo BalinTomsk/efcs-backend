@@ -185,6 +185,9 @@ article. `score` is the BM25 score: unbounded, and not comparable with cosine.
 
 ## 11. Management (port 8081 — never publish)
 
+Bound to `0.0.0.0:8081` unless `NewsIdx__ManagementUrl` names another host (`http://127.0.0.1:8081` on bare Windows).
+The port is fixed: startup refuses any other port, scheme or path.
+
 `/health/live` (process only), `/health/ready` (Qdrant unhealthy = not ready; MySQL failing = degraded,
 search still served), `/metrics`, `/admin/*` (§9). Metrics: `newsidx_index_articles_total{outcome}`,
 `newsidx_index_chunks_total`, `newsidx_sync_runs_total{mode,outcome}`, `newsidx_events_total{outcome}`,
@@ -196,6 +199,11 @@ search still served), `/metrics`, `/admin/*` (§9). Metrics: `newsidx_index_arti
 - **Placement (2026-10-14):** a dedicated Windows Server host running Docker under Rancher Desktop, not
   a droplet. news_idx runs with `--memory 2g` and 6 ONNX threads (~740 MiB while loading); Qdrant with
   `--memory 512m` (~70 MiB for 4.9k articles). Steps and host details: git-ignored `do-update.md`.
+- **Windows service (0.5.0+).** The same build runs as the Windows service `news_idx` (`UseWindowsService`), so
+  CTRL can serve search after a reboot with nobody signed in. As a service it works from its own folder, so
+  `logs/`, `models/` and a relative `DOTENV_PATH` resolve next to `NewsIdx.exe`. Publish:
+  `dotnet publish NewsIdx -c Release -r win-x64 --self-contained -o out/win-x64` plus `models/`. The planned move
+  off Rancher Desktop (Qdrant under WinSW, snapshot cutover) is in `windows-services-plan.md`.
 - **MySQL reachability.** Winhost MySQL is reachable from that host and from docapi's droplet, not from the workstation.
 - **Gateway.** Expose only through cproxy: a new upstream for `/api/v1/newsidx/*`, like waterapi's
   `/api/v1/water/*`. Never publish 8080 or 8081 to the internet. Qdrant binds to localhost / the Docker network only.
