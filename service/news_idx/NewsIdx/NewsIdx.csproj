@@ -7,7 +7,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- Version drives the /health "version" field; keep in step with the service release tag. -->
-    <Version>0.4.1</Version>
+    <Version>0.5.0</Version>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
   </PropertyGroup>
 
@@ -21,6 +21,8 @@
 
   <ItemGroup>
     <!-- MySQL driver for the Winhost `news` table (MIT, fully async). -->
+    <!-- Runs as a Windows service on CTRL (no Docker, no sign-in); a no-op anywhere else. -->
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.0" />
     <PackageReference Include="MySqlConnector" Version="2.6.2" />
     <!-- Qdrant vector database client (gRPC, port 6334). -->
     <PackageReference Include="Qdrant.Client" Version="1.19.0" />

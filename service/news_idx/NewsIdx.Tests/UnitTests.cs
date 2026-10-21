@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using NewsIdx.Configuration;
 using NewsIdx.Domain;
 using NewsIdx.Indexing;
@@ -113,5 +114,31 @@ public class UnitTests
     public async Task ManagementPaths_AreRecognised(string path, bool management)
     {
         await Assert.That(Program.IsManagementPath(path)).IsEqualTo(management);
+    }
+
+    [Test]
+    [Arguments(null, "http://0.0.0.0:8081")]
+    [Arguments("  ", "http://0.0.0.0:8081")]
+    [Arguments("http://127.0.0.1:8081", "http://127.0.0.1:8081")]
+    [Arguments(" http://localhost:8081/ ", "http://localhost:8081")]
+    public async Task ManagementUrl_DefaultsOrNarrowsTheHost(string? configured, string expected)
+    {
+        IConfiguration config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["NewsIdx:ManagementUrl"] = configured })
+            .Build();
+        await Assert.That(Program.ManagementUrl(config)).IsEqualTo(expected);
+    }
+
+    [Test]
+    [Arguments("http://127.0.0.1:9090")]   // the split is by port: 8081 only
+    [Arguments("https://127.0.0.1:8081")]
+    [Arguments("http://127.0.0.1:8081/admin")]
+    [Arguments("127.0.0.1:8081")]
+    public async Task ManagementUrl_RefusesAnotherPortSchemeOrPath(string configured)
+    {
+        IConfiguration config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["NewsIdx:ManagementUrl"] = configured })
+            .Build();
+        await Assert.That(() => Program.ManagementUrl(config)).Throws<InvalidOperationException>();
     }
 }

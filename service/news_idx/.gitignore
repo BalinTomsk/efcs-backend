@@ -21,3 +21,6 @@ models/
 
 # Deploy runbook with host details -- never in the public repo
 docs/do-update.md
+
+# win-x64 publish for the Windows service on CTRL
+out/
