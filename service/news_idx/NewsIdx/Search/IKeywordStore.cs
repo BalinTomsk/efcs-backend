@@ -23,6 +23,12 @@ public interface IKeywordStore
     /// <summary>Every indexed article and the last-edit time it was indexed at.</summary>
     Task<IReadOnlyDictionary<string, DateTime>> ListIndexedVersionsAsync(CancellationToken cancellationToken);
 
+    /// <summary>
+    /// The stored sparse indices (sorted) of each article that is in the BM25 index; an article that is not is left
+    /// out of the answer. Used to tell which query words an article lacks, whichever engine found it.
+    /// </summary>
+    Task<IReadOnlyDictionary<string, uint[]>> GetTermsAsync(IReadOnlyCollection<string> newsIds, CancellationToken cancellationToken);
+
     /// <summary>Best BM25 matches for <paramref name="query"/>, best first.</summary>
     Task<IReadOnlyList<KeywordHit>> SearchAsync(SparseTerms query, int limit, string? country, CancellationToken cancellationToken);
 }

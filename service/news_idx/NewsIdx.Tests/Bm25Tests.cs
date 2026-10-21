@@ -159,6 +159,78 @@ public class Bm25Tests
         return (service, source);
     }
 
+    [Test]
+    public async Task QueryWords_SkipStopWords_OneWordPerStem()
+    {
+        IReadOnlyList<(string Word, uint Term)> words = Bm25Encoder.QueryWords("The fishing and fished Keta");
+
+        await Assert.That(words.Select(w => w.Word)).IsEquivalentTo(new[] { "fishing", "keta" });
+    }
+
+    [Test]
+    public async Task Bm25_Relevance_BestIs100_AndDescending()
+    {
+        (NewsSearchService service, _) = await Indexed();
+
+        NewsSearchResult result = await service.SearchBm25Async("salmon lake", 10, null, CancellationToken.None);
+
+        await Assert.That(result.Items[0].Relevance).IsEqualTo(100);
+        await Assert.That(result.Items.Select(i => i.Relevance).SequenceEqual(result.Items.Select(i => i.Relevance).OrderDescending())).IsTrue();
+        await Assert.That(result.Items.All(i => i.Relevance is >= 0 and <= 100)).IsTrue();
+    }
+
+    [Test]
+    public async Task Bm25_Missing_ListsTheQueryWordsAnArticleLacks()
+    {
+        (NewsSearchService service, _) = await Indexed();
+
+        NewsSearchResult result = await service.SearchBm25Async("keta trout", 10, null, CancellationToken.None);
+        NewsHit keta = result.Items.Single(i => i.Title == "Keta salmon run");
+        NewsHit trout = result.Items.Single(i => i.Title == "Trout stocking");
+
+        await Assert.That(keta.Missing!).IsEquivalentTo(new[] { "trout" });
+        await Assert.That(trout.Missing!).IsEquivalentTo(new[] { "keta" });
+    }
+
+    [Test]
+    public async Task Vector_GetsRelevanceAndMissing_FromTheBm25Terms()
+    {
+        (NewsSearchService service, _) = await Indexed();
+
+        NewsSearchResult result = await service.SearchAsync("rainbow trout stocking walleye", 10, null, CancellationToken.None);
+        NewsHit trout = result.Items.First(i => i.Title == "Trout stocking");
+
+        await Assert.That(trout.Relevance).IsEqualTo(NewsSearchService.VectorRelevance(trout.Score));
+        await Assert.That(trout.Missing!).IsEquivalentTo(new[] { "walleye" });
+    }
+
+    [Test]
+    public async Task Missing_IsNull_WhenTheTermsCannotBeRead_AndSearchStillAnswers()
+    {
+        (_, FakeArticleSource source, FakeVectorStore store, FakeKeywordStore keywords) = await IndexedStores();
+        keywords.TermsFailure = new InvalidOperationException("qdrant down");
+        var service = new NewsSearchService(new FakeEmbedder(), store, keywords, Options.Create(TestSupport.Options()));
+
+        NewsSearchResult result = await service.SearchBm25Async("keta", 10, null, CancellationToken.None);
+
+        await Assert.That(result.Items[0].Title).IsEqualTo("Keta salmon run");
+        await Assert.That(result.Items[0].Missing).IsNull();
+    }
+
+    [Test]
+    [Arguments(0.812f, 81)]
+    [Arguments(1.2f, 100)]
+    [Arguments(-0.1f, 0)]
+    public async Task VectorRelevance_IsCosineAsPercent(float cosine, int percent) =>
+        await Assert.That(NewsSearchService.VectorRelevance(cosine)).IsEqualTo(percent);
+
+    [Test]
+    [Arguments(5f, 5f, 100)]
+    [Arguments(2.5f, 5f, 50)]
+    [Arguments(1f, 0f, 0)]
+    public async Task Bm25Relevance_IsShareOfTheBestScore(float score, float top, int percent) =>
+        await Assert.That(NewsSearchService.Bm25Relevance(score, top)).IsEqualTo(percent);
+
     private static async Task<(NewsSearchService, FakeArticleSource, FakeVectorStore, FakeKeywordStore)> IndexedStores()
     {
         var source = new FakeArticleSource();

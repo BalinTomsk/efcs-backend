@@ -6,6 +6,17 @@ carries the history.
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-10-20
+
+### Added
+- **`relevance` (0..100) on every hit of `/search` and `/bm25`**, so the page can show a percent and sort both
+  engines' hits into one list. Vector: the cosine similarity x 100. BM25: the score as a share of the query's best
+  BM25 hit (best = 100). BM25 scores have no fixed ceiling, so a percent of an absolute maximum would mean nothing.
+- **`missing`: the query words an article does not contain**, like Google's "Missing: ...". It is read from the
+  article's stored BM25 terms (`IKeywordStore.GetTermsAsync`, one Qdrant retrieve per search), so it covers the whole
+  article and works for both engines. Stop words are never reported. `[]` = every word found. `null` = unknown: the
+  article is not in the BM25 index, or the lookup failed. A failed lookup is logged and never fails the search.
+
 ## [0.5.0] — 2026-10-20
 
 ### Added

@@ -25,13 +25,17 @@ public class NewsSearchService
     private readonly IVectorStore _store;
     private readonly IKeywordStore _keywords;
     private readonly SearchOptions _options;
+    private readonly ILogger<NewsSearchService>? _logger;
 
-    public NewsSearchService(ITextEmbedder embedder, IVectorStore store, IKeywordStore keywords, IOptions<NewsIdxOptions> options)
+    public NewsSearchService(
+        ITextEmbedder embedder, IVectorStore store, IKeywordStore keywords, IOptions<NewsIdxOptions> options,
+        ILogger<NewsSearchService>? logger = null)
     {
         _embedder = embedder;
         _store = store;
         _keywords = keywords;
         _options = options.Value.Search;
+        _logger = logger;
     }
 
     public async Task<NewsSearchResult> SearchAsync(string? query, int? limit, string? country, CancellationToken cancellationToken)
@@ -44,14 +48,20 @@ public class NewsSearchService
             IReadOnlyList<ChunkHit> chunks = await _store
                 .SearchAsync(vector, take * OverFetch, c, _options.MinScore, cancellationToken).ConfigureAwait(false);
 
-            List<NewsHit> hits = chunks
+            List<ChunkHit> best = chunks
                 .GroupBy(h => h.NewsId, StringComparer.Ordinal)
                 .Select(g => g.MaxBy(h => h.Score)!)
                 .OrderByDescending(h => h.Score)
                 .Take(take)
+                .ToList();
+            IReadOnlyDictionary<string, IReadOnlyList<string>> missing =
+                await MissingWordsAsync(best.Select(h => h.NewsId).ToList(), q, cancellationToken).ConfigureAwait(false);
+
+            List<NewsHit> hits = best
                 .Select(h => new NewsHit(
                     h.NewsId, h.Title, h.Source, h.Country, h.StampUtc.ToString("yyyy-MM-dd"),
-                    MathF.Round(h.Score, 4), Snippet(h.Text, h.Title), h.LakeId))
+                    MathF.Round(h.Score, 4), Snippet(h.Text, h.Title), h.LakeId,
+                    VectorRelevance(h.Score), missing.GetValueOrDefault(h.NewsId)))
                 .ToList();
 
             return new NewsSearchResult(q, c, hits.Count, hits);
@@ -71,14 +81,64 @@ public class NewsSearchService
             IReadOnlyList<KeywordHit> found = await _keywords
                 .SearchAsync(Bm25Encoder.EncodeQuery(q), take, c, cancellationToken).ConfigureAwait(false);
 
+            IReadOnlyDictionary<string, IReadOnlyList<string>> missing =
+                await MissingWordsAsync(found.Select(h => h.NewsId).ToList(), q, cancellationToken).ConfigureAwait(false);
+            float top = found.Count == 0 ? 0 : found.Max(h => h.Score);
+
             List<NewsHit> hits = found
+                .OrderByDescending(h => h.Score)
                 .Select(h => new NewsHit(
                     h.NewsId, h.Title, h.Source, h.Country, h.StampUtc.ToString("yyyy-MM-dd"),
-                    MathF.Round(h.Score, 4), MatchSnippet(h.Text, q), h.LakeId))
+                    MathF.Round(h.Score, 4), MatchSnippet(h.Text, q), h.LakeId,
+                    Bm25Relevance(h.Score, top), missing.GetValueOrDefault(h.NewsId)))
                 .ToList();
 
             return new NewsSearchResult(q, c, hits.Count, hits);
         }
+    }
+
+    /// <summary>Vector relevance: the cosine similarity as a percent (0.81 → 81), clamped to 0..100.</summary>
+    internal static int VectorRelevance(float cosine) => (int)Math.Clamp(MathF.Round(cosine * 100), 0, 100);
+
+    /// <summary>
+    /// BM25 relevance: the score as a percent of this query's best BM25 hit (best = 100). BM25 scores have no fixed
+    /// ceiling, so this ranks hits within one search; which words a hit lacks is shown by <c>missing</c>.
+    /// </summary>
+    internal static int Bm25Relevance(float score, float top) =>
+        top <= 0 ? 0 : (int)Math.Clamp(MathF.Round(score / top * 100), 0, 100);
+
+    /// <summary>
+    /// For each article, the query words it does not contain anywhere (title, paragraphs or captions), like
+    /// Google's "Missing: ...". Read from the article's stored BM25 terms, so it covers the whole article and works
+    /// for either engine. An article that is not in the BM25 index is left out (unknown, not "nothing missing"), and
+    /// a failed lookup leaves every article out: the search itself never fails because of it.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<string, IReadOnlyList<string>>> MissingWordsAsync(
+        IReadOnlyCollection<string> newsIds, string query, CancellationToken cancellationToken)
+    {
+        var missing = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+        IReadOnlyList<(string Word, uint Term)> words = Bm25Encoder.QueryWords(query);
+        if (words.Count == 0 || newsIds.Count == 0)
+        {
+            return missing;
+        }
+
+        IReadOnlyDictionary<string, uint[]> terms;
+        try
+        {
+            terms = await _keywords.GetTermsAsync(newsIds, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger?.LogWarning(ex, "Could not read BM25 terms; missing words left out.");
+            return missing;
+        }
+
+        foreach ((string id, uint[] docTerms) in terms)
+        {
+            missing[id] = words.Where(w => Array.BinarySearch(docTerms, w.Term) < 0).Select(w => w.Word).ToList();
+        }
+        return missing;
     }
 
     private (string Query, int Limit, string? Country) Validate(string? query, int? limit, string? country)
@@ -147,10 +207,13 @@ public sealed record NewsSearchResult(string Query, string? Country, int Count, 
 
 /// <summary>
 /// One article. <c>score</c> is the cosine similarity of its best chunk (vector) or its BM25 score (bm25);
-/// higher is better, and the two scales are not comparable.
+/// higher is better, and the two scales are not comparable. <c>relevance</c> is the same as a percent 0..100
+/// (vector: cosine x 100; bm25: share of the query's best BM25 score). <c>missing</c>: query words the article
+/// does not contain (empty = all found; null = unknown, the article is not in the BM25 index).
 /// </summary>
 public sealed record NewsHit(
-    string NewsId, string Title, string? Source, string? Country, string Date, float Score, string Snippet, string? LakeId);
+    string NewsId, string Title, string? Source, string? Country, string Date, float Score, string Snippet, string? LakeId,
+    int Relevance, IReadOnlyList<string>? Missing);
 
 /// <summary>Client input error (→ HTTP 400).</summary>
 public sealed class InvalidRequestException(string message) : Exception(message);

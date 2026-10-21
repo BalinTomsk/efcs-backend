@@ -86,7 +86,11 @@ public abstract class NewsIdxSource : ISearchSource
             }
             hits.Add(new SearchHit(id, Str(i, "title") ?? string.Empty, Str(i, "source"), Str(i, "country"),
                 Str(i, "date"), i.TryGetProperty("score", out JsonElement s) && s.ValueKind == JsonValueKind.Number ? s.GetDouble() : 0,
-                Str(i, "snippet"), Str(i, "lakeId")));
+                Str(i, "snippet"), Str(i, "lakeId"),
+                i.TryGetProperty("relevance", out JsonElement r) && r.ValueKind == JsonValueKind.Number ? r.GetInt32() : null,
+                i.TryGetProperty("missing", out JsonElement m) && m.ValueKind == JsonValueKind.Array
+                    ? m.EnumerateArray().Where(w => w.ValueKind == JsonValueKind.String).Select(w => w.GetString()!).ToList()
+                    : null));
         }
         return hits;
     }
