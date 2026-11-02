@@ -80,7 +80,7 @@ public class NewsSyncService
             {
                 await RunLockedAsync(full, stoppingToken).ConfigureAwait(false);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (ex is not OperationCanceledException || !stoppingToken.IsCancellationRequested)
             {
                 // Already logged and recorded in Status by RunLockedAsync.
             }
@@ -138,7 +138,7 @@ public class NewsSyncService
                     IndexOutcome outcome = await _indexer.IndexAsync(newsId, cancellationToken).ConfigureAwait(false);
                     if (outcome.Indexed) status.Indexed++; else status.Removed++;
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException)
+                catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
                 {
                     status.Failed++;
                     status.LastError = $"{newsId}: {ex.Message}";

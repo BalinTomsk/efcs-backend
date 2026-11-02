@@ -61,7 +61,7 @@ public sealed class NewsEventConsumer : BackgroundService
                 {
                     healthy = await PollOnceAsync(stoppingToken).ConfigureAwait(false);
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException)
+                catch (Exception ex) when (ex is not OperationCanceledException || !stoppingToken.IsCancellationRequested)
                 {
                     _logger.LogWarning(ex, "News event poll failed. queue={Queue}", _options.Queue);
                     healthy = false;
@@ -110,7 +110,7 @@ public sealed class NewsEventConsumer : BackgroundService
                 Events.WithLabels("applied").Inc();
                 _activity?.Record($"{evt.Action} article {evt.NewsId}");
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
                 healthy = false;
                 await RetryLaterAsync(evt, body, ex, cancellationToken).ConfigureAwait(false);
@@ -138,7 +138,7 @@ public sealed class NewsEventConsumer : BackgroundService
             _logger.LogWarning(failure,
                 "News event failed; re-queued={Routed} attempt={Attempt} newsId={NewsId}", routed, evt.Attempt, evt.NewsId);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             Events.WithLabels("dropped").Inc();
             _logger.LogError(ex, "News event failed and could not be re-queued; the periodic sync will repair it. newsId={NewsId}", evt.NewsId);
@@ -155,7 +155,7 @@ public sealed class NewsEventConsumer : BackgroundService
                 await _queue.DeclareAsync(_options.Queue, stoppingToken).ConfigureAwait(false);
                 return;
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (ex is not OperationCanceledException || !stoppingToken.IsCancellationRequested)
             {
                 _logger.LogWarning(ex, "RabbitMQ queue declare failed; retrying in {Seconds}s. queue={Queue}",
                     (int)delay.TotalSeconds, _options.Queue);

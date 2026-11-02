@@ -208,11 +208,16 @@ internal sealed class FakeQueue : IMessageQueue
 {
     public Queue<string> Pending { get; } = new();
     public List<string> Published { get; } = [];
+    /// <summary>Thrown by the next GetAsync calls, one per call, before any message is handed out.</summary>
+    public Queue<Exception> GetFailures { get; } = new();
+    public int Gets { get; private set; }
 
     public Task DeclareAsync(string queue, CancellationToken cancellationToken) => Task.CompletedTask;
 
     public Task<IReadOnlyList<string>> GetAsync(string queue, int count, CancellationToken cancellationToken)
     {
+        Gets++;
+        if (GetFailures.TryDequeue(out Exception? failure)) return Task.FromException<IReadOnlyList<string>>(failure);
         var batch = new List<string>();
         while (batch.Count < count && Pending.TryDequeue(out string? m)) batch.Add(m);
         return Task.FromResult<IReadOnlyList<string>>(batch);

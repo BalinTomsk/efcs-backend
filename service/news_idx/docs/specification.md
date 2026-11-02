@@ -136,6 +136,12 @@ Consumer rules: unusable message → logged, dropped. Failure → re-published w
 poll backs off (2 s doubling to 60 s); dropped after `MaxAttempts` (5). Duplicates for one article in a batch
 are indexed once. A dropped or lost event is repaired by the periodic sync (§9).
 
+No background loop (consumer, bootstrap, sync) may end on an error. A failed poll (RabbitMQ down, or an
+`HttpClient.Timeout`, which arrives as `TaskCanceledException`) is logged and backed off like any other failure.
+Background catch filters are `ex is not OperationCanceledException || !token.IsCancellationRequested`, never
+`ex is not OperationCanceledException` alone: an exception escaping `ExecuteAsync` stops the host, and as a Windows
+service that is a clean stop that the recovery actions do not restart (the 2026-10-31 outage, fixed in 0.6.1).
+
 The consumer runs only when `RABBITMQ_MANAGEMENT_URL`, `RABBITMQ_USERNAME` and `RABBITMQ_PASSWORD` are all set.
 
 ## 9. Initial load and sync ("index every article in MySQL")

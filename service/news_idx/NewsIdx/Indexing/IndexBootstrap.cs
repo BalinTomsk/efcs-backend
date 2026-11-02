@@ -81,7 +81,7 @@ public sealed class IndexBootstrap : BackgroundService
                 // Wrong vector size: a configuration error that waiting cannot fix.
                 throw;
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (ex is not OperationCanceledException || !stoppingToken.IsCancellationRequested)
             {
                 _logger.LogWarning(ex, "Qdrant not reachable yet; retrying in {Seconds}s.", (int)delay.TotalSeconds);
                 await Task.Delay(delay, stoppingToken).ConfigureAwait(false);
@@ -126,7 +126,7 @@ public sealed class IndexBootstrap : BackgroundService
         {
             await _sync.RunAsync(full, stoppingToken).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException || !stoppingToken.IsCancellationRequested)
         {
             // Logged by the sync; the periodic run will try again.
         }
