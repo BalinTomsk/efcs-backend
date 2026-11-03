@@ -201,6 +201,34 @@ public class IndexingTests
         await Assert.That(queue.Published).IsEmpty();
     }
 
+    [Test]
+    public async Task Consumer_HttpTimeout_KeepsPolling()
+    {
+        // 0.6.1: an HttpClient timeout is a TaskCanceledException; it used to escape ExecuteAsync and stop the host.
+        var options = Microsoft.Extensions.Options.Options.Create(TestSupport.Options(o =>
+        {
+            o.Sync.OnStartup = "Never";
+            o.Sync.IntervalMinutes = 0;
+            o.Events.PollMilliseconds = 100;
+            o.Events.MaxBackoffSeconds = 1;
+        }));
+        var bootstrap = new IndexBootstrap(new FakeVectorStore(), new FakeKeywordStore(), new FakeEmbedder(),
+            TestSupport.Sync(new FakeArticleSource(), new FakeVectorStore()), options, NullLogger<IndexBootstrap>.Instance);
+        var queue = new FakeQueue();
+        queue.GetFailures.Enqueue(new TaskCanceledException("HttpClient.Timeout", new TimeoutException()));
+        var consumer = new NewsEventConsumer(queue, TestSupport.Indexer(new FakeArticleSource(), new FakeVectorStore()),
+            bootstrap, options, NullLogger<NewsEventConsumer>.Instance);
+
+        await bootstrap.StartAsync(CancellationToken.None);
+        await consumer.StartAsync(CancellationToken.None);
+        for (int i = 0; i < 50 && queue.Gets < 2; i++) await Task.Delay(100);
+
+        await Assert.That(queue.Gets).IsGreaterThanOrEqualTo(2);
+        await Assert.That(consumer.ExecuteTask!.IsCompleted).IsFalse();
+        await consumer.StopAsync(CancellationToken.None);
+        await bootstrap.StopAsync(CancellationToken.None);
+    }
+
     private static NewsEventConsumer Consumer(FakeQueue queue, NewsIndexer indexer)
     {
         var options = Microsoft.Extensions.Options.Options.Create(TestSupport.Options());

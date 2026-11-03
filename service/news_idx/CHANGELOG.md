@@ -6,6 +6,18 @@ carries the history.
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-11-02
+
+### Fixed
+- **A RabbitMQ (or any HttpClient) timeout no longer stops the service.** On 2026-10-31 one management-API poll hit
+  the 10 s `HttpClient.Timeout`. .NET reports that as `TaskCanceledException`, an `OperationCanceledException`, so the
+  poll loop's `catch (Exception ex) when (ex is not OperationCanceledException)` let it through. `ExecuteAsync` ended
+  with an unhandled exception, `BackgroundServiceExceptionBehavior.StopHost` shut the host down, and Windows recorded
+  a clean stop, so the service's restart-on-failure actions never ran. Search was down for about a day.
+  The background paths (`NewsEventConsumer`, `IndexBootstrap`, `NewsSyncService`) now use the status reporters'
+  filter, `ex is not OperationCanceledException || !token.IsCancellationRequested`: a cancellation is swallowed only
+  when shutdown asked for it. Everything else is logged and retried with back-off. Test: `Consumer_HttpTimeout_KeepsPolling`.
+
 ## [0.6.0] — 2026-10-20
 
 ### Added
