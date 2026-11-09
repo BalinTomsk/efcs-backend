@@ -8,10 +8,12 @@ namespace WaterService.Processing;
 /// <para>The pairs are exactly what the old WaterML parser produced: <c>variableName</c> split at the
 /// first comma, trimmed, with <c>&amp;#179;</c> rewritten to <c>^3</c>. They were harvested from live
 /// legacy responses for eight states on 2026-10-11 so the move to the new API changes no stored value.
-/// Some legacy units do not match the procedure's conversion checks (for example <c>in ft</c>, and
-/// <c>water, &amp;#176;C</c> for temperature); that is pre-existing behaviour, kept on purpose.</para>
+/// Some legacy units do not match the procedure's conversion checks (for example <c>in ft</c>); that is
+/// pre-existing behaviour, kept on purpose.</para>
 ///
-/// <para>Codes not listed here are not pushed: the procedure has no column for them.</para>
+/// <para>Codes not listed here are not pushed: the procedure has no column for them. Water temperature
+/// (<c>00010</c> / <c>00011</c>), air temperature (<c>00020</c> / <c>00021</c>) and orthophosphate (<c>00671</c>) are
+/// deliberately left out: they are no longer stored (removed from <c>dbo.WaterData</c> 2026-11-08).</para>
 /// </summary>
 public static class UsgsParameterMap
 {
@@ -19,10 +21,6 @@ public static class UsgsParameterMap
 
     private static readonly IReadOnlyDictionary<string, LegacyName> Map = new Dictionary<string, LegacyName>
     {
-        ["00010"] = new("Temperature", "water, &#176;C"),
-        ["00011"] = new("Temperature", "water, &#176;F"),
-        ["00020"] = new("Temperature", "air, &#176;C"),
-        ["00021"] = new("Temperature", "air, &#176;F"),
         ["00025"] = new("Barometric pressure", "mmHg"),
         ["00030"] = new("Incident solar radiation intensity", "(cal/cm&#178;)/d"),
         ["00035"] = new("Wind speed", "mph"),
@@ -43,7 +41,6 @@ public static class UsgsParameterMap
         ["00301"] = new("Dissolved oxygen", "water, unfiltered, % saturation"),
         ["00400"] = new("pH", "water, unfiltered, field, standard units"),
         ["00480"] = new("Salinity", "water, unfiltered, parts per thousand"),
-        ["00671"] = new("Orthophosphate", "water, filtered, mg/L as P"),
         ["32295"] = new("Colored dissolved organic matter (CDOM)", "water, in situ, single band excitation, fluorescence emission, ppb QSE"),
         ["32315"] = new("Chlorophyll <i>a</i>", "estimated, water, in-situ, in-vivo fluorescence (IVF), relative fluorescence units (RFU)"),
         ["32316"] = new("Chlorophyll <i>a</i>", "estimated, water, in-situ, in-vivo fluorescence (IVF), concentration estimated from reference material, micrograms per liter"),

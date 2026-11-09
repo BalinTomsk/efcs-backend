@@ -320,7 +320,6 @@ Not directly defined in the codebase but referenced by both workers. Must return
 ### 10.6 `spTotalUpdateProbability`
 
 Updates fish catch probability in `fish_location` using:
-- **Temperature** coefficient from `fn_get_koef_fish_station_temperature`
 - **Oxygen** coefficient from `fn_get_koef_fish_station_oxygen`
 - **pH** coefficient from `fn_get_koef_fish_station_ph`
 

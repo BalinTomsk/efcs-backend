@@ -44,13 +44,30 @@ public class StationProcessorUSTests
                 Obs("99999", "2026-10-11T18:00:00+00:00", "410"),          // not a legacy parameter
                 Obs("00060", "2026-10-11T18:00:00+00:00", "12", "00003"), // daily mean, not instantaneous
                 Obs("00065", "2026-10-11T18:00:00+00:00", "Ice"),
-                Obs("00010", "2026-10-11T18:00:00+00:00", "17.2", null),  // no statistic: kept
+                Obs("00060", "2026-10-11T18:00:00+00:00", "17.2", null),  // no statistic: kept
             ],
             Mountain);
 
         await Assert.That(series).HasCount().EqualTo(1);
-        await Assert.That(series[0].Name).IsEqualTo("Temperature");
-        await Assert.That(series[0].Unit).IsEqualTo("water, &#176;C");
+        await Assert.That(series[0].Name).IsEqualTo("Streamflow");
+        await Assert.That(series[0].Unit).IsEqualTo("ft^3/s");
+    }
+
+    [Test]
+    public async Task BuildReadings_DropsReadingsNoLongerStored()
+    {
+        // Water temperature, air temperature and orthophosphate are no longer stored, so none of their codes is pushed.
+        List<UsSeriesReading> series = StationProcessorUS.BuildReadings(
+            [
+                Obs("00010", "2026-10-11T18:00:00+00:00", "17.2"),
+                Obs("00011", "2026-10-11T18:00:00+00:00", "63.0"),
+                Obs("00020", "2026-10-11T18:00:00+00:00", "11.0"),
+                Obs("00021", "2026-10-11T18:00:00+00:00", "52.0"),
+                Obs("00671", "2026-10-11T18:00:00+00:00", "0.02"),
+            ],
+            Mountain);
+
+        await Assert.That(series).IsEmpty();
     }
 
     [Test]

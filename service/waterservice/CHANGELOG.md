@@ -10,6 +10,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The ver
 
 ## [Unreleased]
 
+## [10.6.0] — 2026-11-08
+
+### Removed
+- **USGS air temperature (`00020` / `00021`) and orthophosphate (`00671`) are no longer pushed.** `dbo.WaterData.air`,
+  `.Cyanobacteria` and `.Orthophosphate` were dropped (envfish-db, 2026-11-08): air and cyanobacteria were empty for
+  every station (the legacy unit `air, &#176;C` never matched the procedure's `'Air'` check), orthophosphate was
+  reported by 4 stations. Cyanobacteria had no mapped code. `sp_push_us_water_data` ignores these series too, so an
+  older build still sending them is harmless.
+
+## [10.5.0] — 2026-11-08
+
+### Removed
+- **USGS water temperature (`00010` / `00011`) is no longer pushed.** The reading was dropped from `dbo.WaterData`
+  and `dbo.CurrentWaterState` (envfish-db, 2026-11-08), so `UsgsParameterMap` leaves both codes out and
+  `BuildReadings` skips them like any other unmapped parameter. The legacy unit `water, &#176;C` never matched the
+  procedure's `'Water'` check anyway, so no stored value changes. `sp_push_us_water_data` also ignores a
+  `Temperature`/`Water` series, so an older build still sending one is harmless.
+
 ## [10.4.1] — 2026-10-17 (not deployed)
 
 ### Changed
