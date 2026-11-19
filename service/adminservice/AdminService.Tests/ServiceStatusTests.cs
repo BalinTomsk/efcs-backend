@@ -73,6 +73,15 @@ public class ServiceStatusTests
     }
 
     [Test]
+    public async Task Parse_ReadsRequestTotal_AndIgnoresABadOne()
+    {
+        await Assert.That(ServiceStatusMessage.TryParse(Message(action: "\"requests\":1520,"), out _)!.Requests).IsEqualTo(1520L);
+        await Assert.That(ServiceStatusMessage.TryParse(Message(), out _)!.Requests).IsNull();
+        await Assert.That(ServiceStatusMessage.TryParse(Message(action: "\"requests\":-3,"), out _)!.Requests).IsNull();
+        await Assert.That(ServiceStatusMessage.TryParse(Message(action: "\"requests\":\"many\","), out _)!.Requests).IsNull();
+    }
+
+    [Test]
     public async Task Parse_LowerCasesNames_AndAllowsNoAction()
     {
         ServiceStatusMessage? m = ServiceStatusMessage.TryParse(Message(service: " DocApi ", machine: "Debian-JNode", action: ""), out _);

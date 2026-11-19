@@ -36,6 +36,7 @@ public sealed class SqlServiceStatusRepository : IServiceStatusRepository
         command.Parameters.Add("@sentUtc", SqlDbType.DateTime2).Value = message.SentUtc;
         command.Parameters.Add("@lastActionUtc", SqlDbType.DateTime2).Value = (object?)message.LastActionUtc ?? DBNull.Value;
         command.Parameters.Add("@lastAction", SqlDbType.NVarChar, ServiceStatusMessage.MaxAction).Value = (object?)message.LastAction ?? DBNull.Value;
+        command.Parameters.Add("@requests", SqlDbType.BigInt).Value = (object?)message.Requests ?? DBNull.Value;
 
         object? applied = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
         return applied is int value && value == 1;

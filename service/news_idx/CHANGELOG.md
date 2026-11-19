@@ -6,6 +6,9 @@ carries the history.
 
 ## [Unreleased]
 
+### Added
+- **`requests` in every status message** — the number of news events applied since the process started (Qdrant's own row sends none), so the admin status page (`stats/Default.aspx`) can show requests per hour / day / month. A running total, not a per-heartbeat delta, so a lost or superseded heartbeat loses no count; adminservice 0.2.0 turns it into 5-minute buckets (`dbo.ServiceRequestCount`). An older adminservice ignores the field.
+
 ## [0.6.1] — 2026-11-02
 
 ### Fixed

@@ -16,15 +16,28 @@ public sealed class ServiceActivity
     private readonly object _gate = new();
     private DateTime? _lastUtc;
     private string? _last;
+    private long _requests;
 
-    public void Record(string action)
+    /// <summary>Records the item as the latest one and, unless <paramref name="request"/> is false, counts it as a
+    /// request for the page's per hour / day / month columns.</summary>
+    public void Record(string action, bool request = true)
     {
+        if (request)
+        {
+            Interlocked.Increment(ref _requests);
+        }
         lock (_gate)
         {
             _lastUtc = DateTime.UtcNow;
             _last = action;
         }
     }
+
+    /// <summary>Counts one request without changing the latest item.</summary>
+    public void CountRequest() => Interlocked.Increment(ref _requests);
+
+    /// <summary>Requests counted since the process started; sent as <c>requests</c> with every status message.</summary>
+    public long Requests => Interlocked.Read(ref _requests);
 
     public (DateTime? Utc, string? Action) Last
     {
@@ -100,7 +113,8 @@ public sealed class ServiceStatusReporter : BackgroundService
     internal string Body(string evt, DateTime sentUtc)
     {
         (DateTime? lastUtc, string? last) = _activity.Last;
-        return ServiceStatusMessages.Body(evt, _service, _machine, AppInfo.Version, AppInfo.StartedUtc, sentUtc, lastUtc, last);
+        return ServiceStatusMessages.Body(evt, _service, _machine, AppInfo.Version, AppInfo.StartedUtc, sentUtc, lastUtc, last,
+            _activity.Requests);
     }
 
     private async Task PublishAsync(string evt, CancellationToken cancellationToken)
@@ -129,7 +143,7 @@ public sealed class ServiceStatusReporter : BackgroundService
 public static class ServiceStatusMessages
 {
     internal static string Body(string evt, string service, string machine, string version, DateTime processStartUtc,
-        DateTime sentUtc, DateTime? lastActionUtc, string? lastAction) =>
+        DateTime sentUtc, DateTime? lastActionUtc, string? lastAction, long? requests = null) =>
         JsonSerializer.Serialize(new
         {
             type = ServiceStatusReporter.MessageType,
@@ -141,6 +155,7 @@ public static class ServiceStatusMessages
             sentUtc = sentUtc.ToString("O"),
             lastActionUtc = lastActionUtc?.ToString("O"),
             lastAction,
+            requests,
         });
 
     /// <summary>Publishes one message; throws on failure (callers log once per outage).</summary>

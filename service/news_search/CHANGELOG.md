@@ -4,6 +4,11 @@ All notable changes to `news_search`. Say **why**, not only what.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-11-19 (LIVE on csnode 2026-11-20)
+
+### Added
+- **`requests` in every status message** — the number of searches since the process started, so the admin status page (`stats/Default.aspx`) can show requests per hour / day / month. A running total, not a per-heartbeat delta, so a lost or superseded heartbeat loses no count; adminservice 0.2.0 turns it into 5-minute buckets (`dbo.ServiceRequestCount`). An older adminservice ignores the field.
+
 ## [0.4.0] — 2026-10-20
 
 ### Added

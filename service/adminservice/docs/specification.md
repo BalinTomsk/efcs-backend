@@ -6,9 +6,9 @@ Current state of the service, sufficient to recreate it. History is in `../CHANG
 
 The admin page `fishfind-frontend/aspnet/stats/Default.aspx` lists every backend service:
 
-| service name | machine name | state | start time | last restart | duration | last action time | last action | version |
-|---|---|---|---|---|---|---|---|---|
-| waterservice | csnode | alive | 10/01/2026 4:55pm | 10/12/2026 2:55am | 4:22 hr | 10/16/2026 4:55pm | station 05BH004 | 10.3.1 |
+| service name | machine name | state | start time | last restart | duration | last action time | last action | req / hr | req / day | req / month | version |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| waterservice | csnode | alive | 10/01/2026 4:55pm | 10/12/2026 2:55am | 4:22 hr | 10/16/2026 4:55pm | station 05BH004 | 312 | 7,480 | 221,904 | 10.3.1 |
 
 Services do not write to the database themselves. Each publishes status messages to RabbitMQ; adminservice is the
 only writer of `dbo.ServiceStatus`.
@@ -28,7 +28,7 @@ cproxy       ─┘                                                       stats/
 ```json
 {"type":"fishfind.service-status.v1","event":"heartbeat","service":"waterservice","machine":"csnode",
  "version":"10.3.1","processStartUtc":"2026-10-16T12:00:00Z","sentUtc":"2026-10-16T13:05:00Z",
- "lastActionUtc":"2026-10-16T13:04:58Z","lastAction":"station 05BH004"}
+ "lastActionUtc":"2026-10-16T13:04:58Z","lastAction":"station 05BH004","requests":1520}
 ```
 
 | field | rule |
@@ -39,6 +39,7 @@ cproxy       ─┘                                                       stats/
 | `version` | optional, cut to 32 chars |
 | `processStartUtc`, `sentUtc` | required ISO-8601; read as UTC when no offset is given |
 | `lastActionUtc`, `lastAction` | optional; `lastAction` is ignored without `lastActionUtc`, cut to 256 chars |
+| `requests` | optional; requests (or items) handled since `processStartUtc`, a running total; not a non-negative integer ⇒ ignored |
 
 Publishers send non-persistent messages (`delivery_mode` 1) with `routing_key` = the queue on the default exchange,
 and never declare the queue. `lastAction` must never carry personal data: docapi sends the route pattern, cproxy the
@@ -55,18 +56,23 @@ first three path segments, news_search the engine name, never the query.
   (`dropped`) and backs the poll off exponentially up to `MaxBackoffSeconds` (120). Nothing is re-published.
 - `start` and `stop` events are logged at Information; heartbeats are not logged.
 - **Own row**: `SelfStatusReporter` writes `adminservice` directly through the same procedure — `start`, then a
-  `heartbeat` every `HeartbeatSeconds` (60), `stop` on shutdown — with `lastAction` = "N status messages stored".
+  `heartbeat` every `HeartbeatSeconds` (60), `stop` on shutdown — with `lastAction` = "N status messages stored" and `requests` = N.
 
 ## Database objects (envfish-db)
 
 - `dbo.ServiceStatus` (`script01_createTable.sql`): `id`, `serviceName`, `machineName` (unique together), `version`,
   `startUtc` (first start ever reported), `restartUtc` (latest process start, NULL until the first restart),
-  `lastSeenUtc`, `lastEvent`, `lastActionUtc`, `lastAction`, `updatedUtc`.
+  `lastSeenUtc`, `lastEvent`, `lastActionUtc`, `lastAction`, `requestTotal` (latest running total), `updatedUtc`.
+- `dbo.ServiceRequestCount` (`script01_createTable.sql`): `serviceStatusId`, `bucketUtc` (5-minute bucket), `requests`;
+  cascades with its `ServiceStatus` row.
 - `dbo.sp_service_status_report` (`script02_Proc.sql`): upsert; ignores a message older than `lastSeenUtc`; a
-  `processStartUtc` later than the current start becomes `restartUtc`; keeps the newer `lastAction`. Returns `applied`.
+  `processStartUtc` later than the current start becomes `restartUtc`; keeps the newer `lastAction`; adds the growth of
+  `requests` over `requestTotal` (all of it for a new process, nothing for a stale message) to the current bucket
+  through `dbo.sp_service_request_count_add`, which also deletes buckets older than 31 days. Returns `applied`.
 - `dbo.fn_service_status_list(@deadAfterSeconds)` (`script02_Funct.sql`): rows plus `state` = `dead` when the last
   event was `stop` or nothing arrived for `@deadAfterSeconds`, else `alive`; `upSeconds` since the latest start for an
-  alive service.
+  alive service; `requestsHour` / `requestsDay` / `requestsMonth` = requests in the last 60 min / 24 h / 30 days (NULL
+  for a service that never sent `requests`).
 - `dbo.sp_service_status_delete(@id)`: the page's Remove button for a retired service.
 
 ## Configuration
