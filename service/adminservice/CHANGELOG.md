@@ -5,6 +5,14 @@ and say **why**, not only what. The specification describes the current state; t
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-11-19 (LIVE on csnode 2026-11-20)
+
+### Added
+- **Request counts.** The optional `requests` field of `fishfind.service-status.v1` (requests handled since the process
+  started) is passed to `dbo.sp_service_status_report` as `@requests`, which adds its growth to 5-minute buckets in
+  `dbo.ServiceRequestCount`; `stats/Default.aspx` shows the last hour / day / 30 days. Own row: `requests` = messages
+  stored. Needs the envfish-db objects first (the procedure's new parameter).
+
 ## [0.1.1] — 2026-10-17 (not deployed)
 
 ### Changed

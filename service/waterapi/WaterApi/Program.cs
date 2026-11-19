@@ -80,6 +80,12 @@ try
             await context.Response.WriteAsJsonAsync(ApiResponse.Fail("not_found", "No handler for the requested path"));
             return;
         }
+        // Every public request counts for the status page's per hour / day / month columns; health checks and
+        // metrics scrapes on the management port do not.
+        if (!onManagementPort)
+        {
+            context.RequestServices.GetRequiredService<WaterApi.Status.ServiceActivity>().CountRequest();
+        }
         await next();
     });
 

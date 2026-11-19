@@ -74,7 +74,7 @@ public sealed class SelfStatusReporter : BackgroundService
     {
         DateTime now = _time.GetUtcNow().UtcDateTime;
         var message = new ServiceStatusMessage(evt, ServiceName, _machine, AppInfo.Version, AppInfo.StartedUtc, now,
-            now, $"{ServiceStatusStats.Stored} status messages stored");
+            now, $"{ServiceStatusStats.Stored} status messages stored", ServiceStatusStats.Stored);
         try
         {
             await _repository.ReportAsync(message, cancellationToken).ConfigureAwait(false);

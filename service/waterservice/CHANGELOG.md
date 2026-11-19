@@ -10,6 +10,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The ver
 
 ## [Unreleased]
 
+## [10.7.0] — 2026-11-19 (LIVE on csnode 2026-11-20)
+
+### Added
+- **`requests` in every status message** — the number of stations processed since the process started, so the admin status page (`stats/Default.aspx`) can show requests per hour / day / month. A running total, not a per-heartbeat delta, so a lost or superseded heartbeat loses no count; adminservice 0.2.0 turns it into 5-minute buckets (`dbo.ServiceRequestCount`). An older adminservice ignores the field.
+
 ## [10.6.0] — 2026-11-08
 
 ### Removed

@@ -91,7 +91,7 @@ NEWSIDX_URL=http://localhost:8080 dotnet run --project NewsSearch --no-launch-pr
 `fishfind.servicestatus.events` (management HTTP API, `POST /api/exchanges/%2F/amq.default/publish`, non-persistent):
 `start` at startup, `heartbeat` every `STATUS_INTERVAL_SECONDS` (60, minimum 10) with the latest `ServiceActivity`,
 `stop` on a clean shutdown (3 s budget). Service name `news_search`; machine = `STATUS_MACHINE`, else the machine name
-(lower-cased). `SearchService` records `search <source>` per request — the engine only, never the query text. Registered by `AddServiceStatusReporting` only when `RABBITMQ_MANAGEMENT_URL`,
+(lower-cased). `SearchService` records `search <source>` per request — the engine only, never the query text. Every message carries `requests`, the searches since the process started. Registered by `AddServiceStatusReporting` only when `RABBITMQ_MANAGEMENT_URL`,
 `RABBITMQ_USERNAME` and `RABBITMQ_PASSWORD` are all set; `ServiceActivity` is always registered and optional for its
 callers. A failed publish logs one warning per outage and is never retried. The contract and the consumer
 (efcs-backend `adminservice` → `dbo.ServiceStatus` → fishfind-frontend `stats/Default.aspx`) are specified in

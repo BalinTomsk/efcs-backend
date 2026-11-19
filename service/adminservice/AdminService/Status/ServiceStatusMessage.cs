@@ -9,10 +9,12 @@ namespace AdminService.Status;
 /// <code>
 /// {"type":"fishfind.service-status.v1","event":"heartbeat","service":"waterservice","machine":"csnode",
 ///  "version":"10.3.1","processStartUtc":"2026-10-16T12:00:00Z","sentUtc":"2026-10-16T13:05:00Z",
-///  "lastActionUtc":"2026-10-16T13:04:58Z","lastAction":"station 05BH004"}
+///  "lastActionUtc":"2026-10-16T13:04:58Z","lastAction":"station 05BH004","requests":1520}
 /// </code>
 /// <c>event</c> is <c>start</c> (process came up), <c>heartbeat</c> (every minute while running) or
-/// <c>stop</c> (clean shutdown). <c>lastActionUtc</c>/<c>lastAction</c> are optional.
+/// <c>stop</c> (clean shutdown). <c>lastActionUtc</c>/<c>lastAction</c> are optional. <c>requests</c> (optional) is
+/// the number of requests the process handled since <c>processStartUtc</c>; a running total, so a lost heartbeat
+/// loses no count.
 /// </summary>
 public sealed record ServiceStatusMessage(
     string Event,
@@ -22,7 +24,8 @@ public sealed record ServiceStatusMessage(
     DateTime ProcessStartUtc,
     DateTime SentUtc,
     DateTime? LastActionUtc,
-    string? LastAction)
+    string? LastAction,
+    long? Requests = null)
 {
     public const string MessageType = "fishfind.service-status.v1";
 
@@ -79,7 +82,7 @@ public sealed record ServiceStatusMessage(
             string? action = actionUtc is null ? null : Cut(Text(root, "lastAction"), MaxAction);
 
             return new ServiceStatusMessage(evt, service, machine, Cut(Text(root, "version"), MaxVersion),
-                started.Value, sent.Value, actionUtc, action);
+                started.Value, sent.Value, actionUtc, action, Count(root, "requests"));
         }
         catch (JsonException ex)
         {
@@ -91,6 +94,13 @@ public sealed record ServiceStatusMessage(
     private static string? Text(JsonElement root, string name) =>
         root.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String
             ? value.GetString()
+            : null;
+
+    /// <summary>A non-negative whole number, else <c>null</c> (a bad count never rejects the heartbeat).</summary>
+    private static long? Count(JsonElement root, string name) =>
+        root.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.Number
+            && value.TryGetInt64(out long count) && count >= 0
+            ? count
             : null;
 
     private static DateTime? Utc(JsonElement root, string name)

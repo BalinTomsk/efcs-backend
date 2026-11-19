@@ -120,7 +120,7 @@ public class StationMapCache
             LoadedGauge.WithLabels(country).Set(new DateTimeOffset(snapshot.LoadedUtc).ToUnixTimeSeconds());
             RefreshCounter.WithLabels(country, "success").Inc();
             _logger.LogInformation("Station map cache loaded. country={Country} stations={Count}", country, stations.Count);
-            _activity?.Record($"map {country} {stations.Count} stations");
+            _activity?.Record($"map {country} {stations.Count} stations", request: false);
             return true;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
