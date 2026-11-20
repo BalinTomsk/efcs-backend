@@ -310,6 +310,38 @@ public class StationWorkerTests
     }
 
     [Test]
+    public async Task RunCountryCycle_RetriesAPassThatCouldNotStart()
+    {
+        // 2026-11-20 12:00 UTC: CA and US fired together just after a DB outage; the half-open SQL breaker let
+        // only CA's probe through, US's first call was refused, and the whole US hour was lost.
+        var harness = new Harness();
+        harness.Stations["US"] = [new("08313000", "NY", -5)];
+        harness.TransientLoadFailures["US"] = 1;
+
+        int processed = await harness.Worker.RunCountryCycleAsync("US", CancellationToken.None);
+
+        await Assert.That(processed).IsEqualTo(1);
+        await Assert.That(harness.ProcessorUS.Seen).IsEquivalentTo(new[] { "08313000" });
+        await Assert.That(harness.PostProcessing.SpeciesRuns).IsEqualTo(1);
+        await Assert.That(harness.Log.MessagesAt(LogLevel.Warning).Any(m => m.Contains("could not start")))
+            .IsTrue();
+    }
+
+    [Test]
+    public async Task RunCountryCycle_GivesUpAfterTheConfiguredRetries()
+    {
+        var harness = new Harness(o => o.PassStartRetries = 2);
+        harness.Stations["US"] = [new("08313000", "NY", -5)];
+        harness.TransientLoadFailures["US"] = 100;
+
+        int processed = await harness.Worker.RunCountryCycleAsync("US", CancellationToken.None);
+
+        await Assert.That(processed).IsEqualTo(0);
+        await Assert.That(harness.LoadAttempts["US"]).IsEqualTo(3); // first try + 2 retries
+        await Assert.That(harness.PostProcessing.CleanupRuns).IsEqualTo(1);
+    }
+
+    [Test]
     public async Task SlowCaPass_DoesNotHoldBackTheUsSchedule()
     {
         // The bug this pins: one loop awaited both passes, so a ~28 h CA pass meant US data refreshed
@@ -522,6 +554,7 @@ public class StationWorkerTests
             {
                 Cron = EveryHour,
                 PauseBetweenStationsMs = 0, // no artificial delay unless a test asks for one
+                PassStartRetryDelayMs = 0,
                 Enabled = true,
             };
             configure?.Invoke(options);
@@ -568,15 +601,27 @@ public class StationWorkerTests
         };
 
         public Dictionary<string, Exception> StationLoadFailures { get; } = [];
+
+        /// <summary>Per country: how many station loads fail before they start succeeding.</summary>
+        public Dictionary<string, int> TransientLoadFailures { get; } = [];
+
+        public Dictionary<string, int> LoadAttempts { get; } = new() { ["CA"] = 0, ["US"] = 0 };
     }
 
     private sealed class FakeStationRepository(Harness harness) : WaterStationRepository(null!)
     {
         public override Task<IReadOnlyList<StationRef>> FindSupportedAsync(string country, CancellationToken ct = default)
         {
+            harness.LoadAttempts[country]++;
             if (harness.StationLoadFailures.TryGetValue(country, out Exception? failure))
             {
                 throw failure;
+            }
+
+            if (harness.TransientLoadFailures.TryGetValue(country, out int left) && left > 0)
+            {
+                harness.TransientLoadFailures[country] = left - 1;
+                throw new InvalidOperationException("The circuit is now open and is not allowing calls.");
             }
 
             harness.BackoffRepo.Note("load-stations-after-refresh");
