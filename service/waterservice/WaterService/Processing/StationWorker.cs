@@ -284,14 +284,37 @@ public sealed class StationWorker : BackgroundService
 
     /// <summary>
     /// Runs one country's scheduled cycle: its pass, then post-processing (species push only when at least
-    /// one station succeeded; cleanup always).
+    /// one station succeeded; cleanup always). A pass that throws before processing (the station list or the
+    /// backoff refresh failed) is retried up to <see cref="WorkerOptions.PassStartRetries"/> times,
+    /// <see cref="WorkerOptions.PassStartRetryDelayMs"/> apart: on 2026-11-20 the CA and US cycles fired
+    /// together right after a DB outage, the half-open SQL breaker let only CA's probe through, and US lost
+    /// its whole hour. Only a failure before the first station is retried, so a pass that has started
+    /// writing is never repeated.
     /// </summary>
     /// <returns>The number of stations processed successfully.</returns>
     public async Task<int> RunCountryCycleAsync(string country, CancellationToken ct)
     {
         string correlationId = Guid.NewGuid().ToString("N").Substring(0, 8);
-        PassStats stats = await AwaitPassAsync(RunPassAsync(country, null, correlationId, ct), country)
+        PassStats? attempt = await TryPassAsync(RunPassAsync(country, null, correlationId, ct), country)
             .ConfigureAwait(false);
+        for (int retry = 1; attempt is null && retry <= _options.PassStartRetries; retry++)
+        {
+            using (LogContext.PushProperty(CorrelationIdProperty, correlationId))
+            {
+                _log.LogWarning(
+                    "Station pass could not start; retrying. country={Country} retry={Retry}/{Retries} delayMs={DelayMs}",
+                    country, retry, _options.PassStartRetries, _options.PassStartRetryDelayMs);
+            }
+
+            if (_options.PassStartRetryDelayMs > 0)
+            {
+                await Task.Delay(_options.PassStartRetryDelayMs, ct).ConfigureAwait(false);
+            }
+
+            attempt = await TryPassAsync(RunPassAsync(country, null, correlationId, ct), country).ConfigureAwait(false);
+        }
+
+        PassStats stats = attempt ?? PassStats.Empty(country);
 
         using (LogContext.PushProperty(CorrelationIdProperty, correlationId))
         {
@@ -385,11 +408,24 @@ public sealed class StationWorker : BackgroundService
         }
     }
 
-    private async Task<PassStats> AwaitPassAsync(Task<PassStats> pass, string country)
+    private async Task<PassStats> AwaitPassAsync(Task<PassStats> pass, string country) =>
+        await TryPassAsync(pass, country).ConfigureAwait(false) ?? PassStats.Empty(country);
+
+    /// <summary>
+    /// Awaits a pass and logs a failure. Returns <c>null</c> only when the pass failed before processing any
+    /// station (<see cref="PassStartException"/>), i.e. when running it again is safe; any later failure is
+    /// returned as an empty result, as before.
+    /// </summary>
+    private async Task<PassStats?> TryPassAsync(Task<PassStats> pass, string country)
     {
         try
         {
             return await pass.ConfigureAwait(false);
+        }
+        catch (PassStartException ex)
+        {
+            _log.LogError(ex.InnerException, "Station pass failed. country={Country}", country);
+            return null;
         }
         catch (Exception ex)
         {
@@ -398,27 +434,50 @@ public sealed class StationWorker : BackgroundService
         }
     }
 
+    /// <summary>A pass failed while loading its stations, before any station was processed.</summary>
+    private sealed class PassStartException(Exception inner) : Exception(inner.Message, inner);
+
     /// <summary>
     /// Processes one country's stations once and returns the number processed successfully. Does not run
     /// post-processing. Honours cancellation by stopping the pass early.
     /// </summary>
-    public async Task<int> RunOnceAsync(string country, string? requestedMli, CancellationToken ct) =>
-        (await RunOnceStatsAsync(country, requestedMli, ct).ConfigureAwait(false)).Succeeded;
+    public async Task<int> RunOnceAsync(string country, string? requestedMli, CancellationToken ct)
+    {
+        try
+        {
+            return (await RunOnceStatsAsync(country, requestedMli, ct).ConfigureAwait(false)).Succeeded;
+        }
+        catch (PassStartException ex)
+        {
+            // Callers outside the scheduler see the original failure, not the internal retry marker.
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex.InnerException!).Throw();
+            throw;
+        }
+    }
 
     private async Task<PassStats> RunOnceStatsAsync(string country, string? requestedMli, CancellationToken ct)
     {
         DateOnly today = DateOnly.FromDateTime(DateTime.Today);
-        await _http503Backoff.RefreshDueAsync(today, ct).ConfigureAwait(false);
-        IReadOnlyList<Domain.StationRef> stations = await _repo.FindSupportedAsync(country, ct).ConfigureAwait(false);
-        _log.LogInformation("Loaded supported stations. country={Country} count={Count} requestedStation={Requested}",
-            country, stations.Count,
-            string.IsNullOrWhiteSpace(requestedMli) ? "<all>" : requestedMli);
-
-        // US stations are read from one USGS snapshot per pass rather than one request per station.
-        if (country == "US")
+        IReadOnlyList<Domain.StationRef> stations;
+        try
         {
-            await _processorUS.PrepareCycleAsync(stations.Select(s => s.Mli).ToList(), requestedMli, ct)
-                .ConfigureAwait(false);
+            await _http503Backoff.RefreshDueAsync(today, ct).ConfigureAwait(false);
+            stations = await _repo.FindSupportedAsync(country, ct).ConfigureAwait(false);
+            _log.LogInformation("Loaded supported stations. country={Country} count={Count} requestedStation={Requested}",
+                country, stations.Count,
+                string.IsNullOrWhiteSpace(requestedMli) ? "<all>" : requestedMli);
+
+            // US stations are read from one USGS snapshot per pass rather than one request per station.
+            if (country == "US")
+            {
+                await _processorUS.PrepareCycleAsync(stations.Select(s => s.Mli).ToList(), requestedMli, ct)
+                    .ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            // Nothing written yet, so the scheduled cycle may safely run the pass again.
+            throw new PassStartException(ex);
         }
 
         int succeeded = 0;

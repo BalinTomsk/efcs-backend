@@ -33,6 +33,16 @@ public sealed class WorkerOptions
     /// snapshot and never pause.</summary>
     public int PauseBetweenStationsMs { get; set; } = 1000;
 
+    /// <summary>
+    /// How many times a scheduled pass that failed before processing (station list or backoff refresh threw,
+    /// e.g. the SQL circuit breaker refused the call) is retried in the same cycle. Without it, a DB blip at
+    /// the top of the hour cost that country the whole hour. <c>0</c> disables the retry.
+    /// </summary>
+    public int PassStartRetries { get; set; } = 3;
+
+    /// <summary>Wait before each <see cref="PassStartRetries"/> retry; longer than the 30 s SQL breaker.</summary>
+    public int PassStartRetryDelayMs { get; set; } = 60000;
+
     /// <summary>TCP connect-establishment timeout for the upstream feeds.</summary>
     public int ConnectTimeoutMs { get; set; } = 15000;
 

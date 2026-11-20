@@ -10,6 +10,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The ver
 
 ## [Unreleased]
 
+## [10.8.0] — 2026-11-20 (LIVE on csnode 2026-11-20)
+
+### Fixed
+- **A pass that cannot start is retried in the same cycle** (`Water:Worker:PassStartRetries`, default 3,
+  `PassStartRetryDelayMs`, default 60000). On 2026-11-20 at 12:00 UTC the CA and US cycles fired together right after a
+  ~20 s DB outage; the half-open `sql` breaker let only CA's probe through, US's first call was refused with
+  `BrokenCircuitException`, and the whole US hour was lost (0 stations until 13:00; the admin page's Req / hr for this
+  service fell to ~2,100 from ~11,700). Only a failure before the first station (backoff refresh, station list, USGS
+  snapshot) is retried, so a pass that has started writing is never repeated; a failure later in the pass still ends
+  it as before. Startup and `--console` runs are unchanged.
+
 ## [10.7.0] — 2026-11-19 (LIVE on csnode 2026-11-20)
 
 ### Added
