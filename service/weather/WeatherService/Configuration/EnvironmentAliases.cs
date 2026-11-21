@@ -48,6 +48,8 @@ public static class EnvironmentAliases
         ("GOOGLE_WEATHER_DAILY_LIMIT", "Weather:Worker:DailyLimit:GoogleWeather"),
         ("WEATHER_CANADA_DAILY_LIMIT", "Weather:Worker:DailyLimit:WeatherCanada"),
         ("WUNDERGROUND_DAILY_LIMIT", "Weather:Worker:DailyLimit:Wunderground"),
+        ("OPEN_METEO_PRESSURE_ENABLE", "Weather:Worker:PressureBackfill:Enabled"),
+        ("OPEN_METEO_PRESSURE_DAILY_LIMIT", "Weather:Worker:PressureBackfill:DailyLimit"),
         ("WEATHER_STATE_DIR", "Weather:Lifecycle:StateDir"),
     ];
 

@@ -69,6 +69,7 @@ public static class ServiceRegistration
         services.AddSingleton<WeatherGovConverter>();
 
         services.AddSingleton<StationProcessorOpen>();
+        services.AddSingleton<PressureBackfill>();
         services.AddSingleton<StationProcessorWeatherGov>();
         services.AddSingleton<StationProcessorVisualCrossing>();
         services.AddSingleton<StationProcessorGoogleWeather>();

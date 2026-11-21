@@ -15,6 +15,7 @@ public class StationProcessorWeatherGov : StationProcessorBase
     private readonly WeatherGovStationResolver _resolver;
     private readonly WeatherDataRepository _weatherDataRepository;
     private readonly WeatherGovConverter _converter;
+    private readonly PressureBackfill? _pressureBackfill;
     private readonly ILogger<StationProcessorWeatherGov> _log;
 
     public StationProcessorWeatherGov(
@@ -22,8 +23,10 @@ public class StationProcessorWeatherGov : StationProcessorBase
         WeatherGovStationResolver resolver,
         WeatherDataRepository weatherDataRepository,
         WeatherGovConverter converter,
-        ILogger<StationProcessorWeatherGov> log)
+        ILogger<StationProcessorWeatherGov> log,
+        PressureBackfill? pressureBackfill = null)
     {
+        _pressureBackfill = pressureBackfill;
         _fetcher = fetcher;
         _resolver = resolver;
         _weatherDataRepository = weatherDataRepository;
@@ -37,6 +40,11 @@ public class StationProcessorWeatherGov : StationProcessorBase
         // Convert HERE, not in the database. A shape the converter does not recognise throws and is
         // counted as a failed station; the old T-SQL parser could only fail silently.
         CanonicalForecast forecast = _converter.Convert(json, station.Mli);
+        // /forecast has no pressure; Open-Meteo fills it so the pressure forecast factor covers US stations.
+        if (_pressureBackfill is not null)
+        {
+            forecast = await _pressureBackfill.FillAsync(forecast, station, ct).ConfigureAwait(false);
+        }
         string canonical = forecast.ToJson();
         _log.LogDebug("Saving Weather.gov payload. station={Mli} state={State} days={Days} bytes={Bytes}",
             station.Mli, station.State, forecast.Days.Count, canonical.Length);
