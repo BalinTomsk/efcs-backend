@@ -78,6 +78,8 @@ public sealed class WorkerOptions
 
     public PostProcessingOptions PostProcessing { get; set; } = new();
 
+    public PressureBackfillOptions PressureBackfill { get; set; } = new();
+
     /// <summary>
     /// Per-provider on/off switch. All default to <c>true</c>: a provider is opted <em>out</em>
     /// explicitly, so adding a new one never requires touching every deployment's env file.
@@ -175,6 +177,21 @@ public sealed class WorkerOptions
         /// effective call volume against the key's quota is roughly double this station count.
         /// </summary>
         public int Wunderground { get; set; } = 450;
+    }
+
+    /// <summary>
+    /// Fills <c>pressureHpa</c> from Open-Meteo for providers whose forecast has none (Weather.gov's
+    /// <c>/forecast</c>). One extra Open-Meteo call per such station, metered by
+    /// <c>WeatherApiUsageTracker</c> under its own key (<c>OpenMeteoPressure</c>), separate from the CA
+    /// Open-Meteo worker's <see cref="DailyLimitOptions.OpenMeteo"/>. A failed call saves the forecast
+    /// without pressure; it never fails the station.
+    /// </summary>
+    public sealed class PressureBackfillOptions
+    {
+        public bool Enabled { get; set; } = true;
+
+        /// <summary>Sized above <see cref="DailyLimitOptions.WeatherGov"/> (900), the only caller today.</summary>
+        public int DailyLimit { get; set; } = 1000;
     }
 
     public sealed class PostProcessingOptions

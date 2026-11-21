@@ -4,6 +4,19 @@ All notable changes for this service must be recorded in this file.
 
 ## [Unreleased]
 
+## [10.5.0] — 2026-11-21 (LIVE on csnode 2026-11-21)
+
+### Added
+- **Open-Meteo pressure for Weather.gov forecasts.** NWS `/forecast` has no pressure, so ~2,000 US stations had none in
+  `dbo.weather_Forecast`, and the FishFind pressure forecast factor needs a daily pressure series. After converting, the
+  Weather.gov processor now asks Open-Meteo for `hourly=pressure_msl` only and fills `pressureHpa` on days without it,
+  using the last hour of each local day (the same sample `OpenMeteoConverter` stores). `Processing/PressureBackfill` +
+  `Canonical/PressureFill`; `OpenMeteoFetcher.FetchPressureAsync`.
+  Metered under its own ledger key `OpenMeteoPressure` (`PressureBackfill:DailyLimit`, default 1000), separate from the CA
+  Open-Meteo worker. `OPEN_METEO_PRESSURE_ENABLE` / `OPEN_METEO_PRESSURE_DAILY_LIMIT` override; defaults need no env change.
+  Best-effort: disabled, out of budget or a failed call saves the forecast without pressure, never fails the station.
+  Pairs with envfish-db `sp_ows_meteo*` 2026-11-21 (MERGE keeps a stored pressure when a provider sends none).
+
 ## [10.4.0] — 2026-11-19 (LIVE on csnode 2026-11-20)
 
 ### Added

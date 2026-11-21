@@ -44,6 +44,24 @@ public class OpenMeteoFetcher : WeatherFetcherBase
         return ExecuteFetchAsync(target, ct);
     }
 
+    /// <summary>
+    /// Fetches hourly <c>pressure_msl</c> only, for <c>PressureBackfill</c>. <c>timezone=auto</c> keeps the
+    /// hour stamps local, so their dates line up with the other provider's forecast days.
+    /// </summary>
+    public virtual Task<string> FetchPressureAsync(double latitude, double longitude, CancellationToken ct = default)
+    {
+        string url = Options.OpenMeteoBaseUrl
+            + "?latitude=" + latitude.ToString(CultureInfo.InvariantCulture)
+            + "&longitude=" + longitude.ToString(CultureInfo.InvariantCulture)
+            + "&hourly=pressure_msl&forecast_days=8&timezone=auto";
+        var target = new FetchTarget(
+            url,
+            $"Open-Meteo pressure not published for URL {url}",
+            $" for URL {url}");
+
+        return ExecuteFetchAsync(target, ct);
+    }
+
     protected override void ConfigureRequest(HttpRequestMessage request) =>
         request.Headers.TryAddWithoutValidation("User-Agent", CurrentUserAgent());
 
