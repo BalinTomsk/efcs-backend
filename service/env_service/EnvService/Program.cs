@@ -41,7 +41,8 @@ try
     bool statusReporting = builder.Services.AddServiceStatusReporting(builder.Configuration, "env_service");
     builder.Services.AddHealthChecks()
         .AddCheck<EnvDataHealthCheck>("envdata", tags: ["ready"])
-        .AddCheck<SqlServerHealthCheck>("sqlserver", tags: ["ready"]);
+        .AddCheck<SqlServerHealthCheck>("sqlserver", tags: ["ready"])
+        .AddCheck<StationCacheHealthCheck>("stationcache", tags: ["ready"]);
 
     builder.Services.AddControllers();
 

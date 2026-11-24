@@ -62,8 +62,48 @@ public static class ResiliencePipelines
                 });
         });
 
+        // REST reads: their own breaker and one quick retry, so an HTTP caller is answered (or refused) within about a
+        // second and request bursts never open the jobs' breaker above.
+        services.AddResiliencePipeline(SqlRead, (builder, context) =>
+        {
+            ILogger logger = context.ServiceProvider.GetRequiredService<ILoggerFactory>()
+                .CreateLogger("EnvService.Resilience." + SqlRead);
+            PredicateBuilder<object> handle = new PredicateBuilder().Handle<Exception>(IsSqlFailure);
+
+            builder
+                .AddCircuitBreaker(new CircuitBreakerStrategyOptions
+                {
+                    FailureRatio = 0.5,
+                    MinimumThroughput = 10,
+                    SamplingDuration = TimeSpan.FromSeconds(30),
+                    BreakDuration = TimeSpan.FromSeconds(15),
+                    ShouldHandle = handle,
+                    OnOpened = args =>
+                    {
+                        logger.LogWarning("Circuit breaker '{Breaker}' opened for {BreakSeconds}s after sustained failures.",
+                            SqlRead, (int)args.BreakDuration.TotalSeconds);
+                        return default;
+                    },
+                    OnClosed = _ =>
+                    {
+                        logger.LogInformation("Circuit breaker '{Breaker}' closed (recovered).", SqlRead);
+                        return default;
+                    },
+                })
+                .AddRetry(new RetryStrategyOptions
+                {
+                    MaxRetryAttempts = 1,
+                    Delay = TimeSpan.FromMilliseconds(250),
+                    BackoffType = DelayBackoffType.Constant,
+                    ShouldHandle = handle,
+                });
+        });
+
         return services;
     }
+
+    /// <summary>The pipeline of the REST reads (<see cref="EnvService.Data.MySqlEnvReadStore"/>).</summary>
+    public const string SqlRead = "sql-read";
 
     /// <summary>
     /// Database failures worth retrying / tripping the breaker: any database or timeout error, EXCEPT an envdata

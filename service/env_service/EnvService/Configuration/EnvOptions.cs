@@ -17,6 +17,9 @@ public sealed class EnvOptions
     /// <summary>Rows per table-valued parameter push to SQL Server.</summary>
     public int PushBatchSize { get; set; } = 1000;
 
+    /// <summary>The REST station cache (envdata <c>v_station_info</c>) is reloaded every this many minutes.</summary>
+    public int StationCacheMinutes { get; set; } = 15;
+
     /// <summary>Switches; both on by default. Off = the job never runs on its own (POST /admin/run still works).</summary>
     public bool MirrorEnabled { get; set; } = true;
 

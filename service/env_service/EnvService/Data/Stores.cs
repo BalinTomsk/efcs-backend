@@ -29,6 +29,22 @@ public interface IEnvStore
 }
 
 /// <summary>
+/// The REST read side of envdata (views only; <see cref="MySqlEnvReadStore"/> is the real one, tests use fakes).
+/// Per-request reads are primary-key lookups; the station list is read whole by the cache, never per request.
+/// </summary>
+public interface IEnvReadStore
+{
+    /// <summary><c>v_station_info</c>, every station (~12,000).</summary>
+    Task<IReadOnlyList<StationInfo>> StationInfosAsync(CancellationToken ct);
+
+    /// <summary><c>v_station_state</c> of these stations (a station without a reading has no row).</summary>
+    Task<IReadOnlyList<StationStateRow>> CurrentAsync(IReadOnlyCollection<int> sids, CancellationToken ct);
+
+    /// <summary><c>v_weather_day</c> of these stations from <paramref name="from"/> to <paramref name="to"/> inclusive.</summary>
+    Task<IReadOnlyList<WeatherDayRow>> WeatherAsync(IReadOnlyCollection<int> sids, DateOnly from, DateOnly to, CancellationToken ct);
+}
+
+/// <summary>
 /// SQL Server: env_service's boundary there is schema <c>env</c> only (<c>envfish-db/mssql</c>, the [env] blocks).
 /// <see cref="SqlFishStore"/> is the real one; tests use fakes.
 /// </summary>

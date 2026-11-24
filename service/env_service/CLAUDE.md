@@ -26,9 +26,12 @@ Deploy runbook: `docs/do-update.md`. Endpoint contracts: `docs/api-reference.htm
   legacy `dbo.spTotalUpdateProbability` returns at once. Never bypass the switch from C#.
 - **A failure never loses work:** pending `job_run` cycles are marked handed over only after every push succeeded.
 - **Startup lines at `Information`** (`env_service … starting`, `Station mirror started`, `Hand-over started`,
-  each job's `… done`), so a deploy is verified without Debug.
-- **Ports:** 8080 public (`/health`; later `/api/v1/env/*`), 8081 private (`/health/live`, `/health/ready`, `/metrics`,
+  `Station cache started`, each job's `… done`), so a deploy is verified without Debug.
+- **Ports:** 8080 public (`/health`, `/api/v1/env/*`), 8081 private (`/health/live`, `/health/ready`, `/metrics`,
   `/admin/*`), split by `Connection.LocalPort`, never `RequireHost`. Never publish 8081 beyond localhost.
+- **Reads (`/api/v1/env/*`):** validate first (400 before any read); stations only from `StationCache` (never a
+  per-request station scan); everything else a primary-key range of an envdata view through the `sql-read` pipeline;
+  a failed refresh keeps the last snapshot, 503 only before the first load. Metric, pressure mm Hg, times UTC.
 - **Exposure (later REST):** through cproxy and the VPC only; every route under `/api/v1/env/`.
 - **Sized before deploy:** memory cap + the 150 MB guard; verify by restart count, never a log tail.
 - No `InvariantGlobalization`; option collections default to **empty**; tests in TUnit.
@@ -37,6 +40,6 @@ Deploy runbook: `docs/do-update.md`. Endpoint contracts: `docs/api-reference.htm
 
 ```bash
 dotnet build EnvService.slnx
-dotnet run --project EnvService.Tests            # 14 tests (job logic with fakes, TVP/JSON contracts, ports)
+dotnet run --project EnvService.Tests            # 27 tests (job logic and reads with fakes, TVP/JSON contracts, ports)
 dotnet run --project EnvService.Migrator.Tests   # 11 tests (conversions)
 ```

@@ -1,5 +1,6 @@
 using EnvService.Data;
 using EnvService.Jobs;
+using EnvService.Reads;
 using EnvService.Web;
 using Polly.Registry;
 
@@ -25,6 +26,13 @@ public static class ServiceRegistration
             new MySqlEnvStore(connections.EnvData, sp.GetRequiredService<ResiliencePipelineProvider<string>>()));
         services.AddSingleton<IFishStore>(sp =>
             new SqlFishStore(connections.SqlServer, sp.GetRequiredService<ResiliencePipelineProvider<string>>()));
+
+        services.AddSingleton<IEnvReadStore>(sp =>
+            new MySqlEnvReadStore(connections.EnvData, sp.GetRequiredService<ResiliencePipelineProvider<string>>()));
+        services.AddSingleton<StationCache>();
+        services.AddSingleton<StationCacheJob>();
+        services.AddHostedService(sp => sp.GetRequiredService<StationCacheJob>());
+        services.AddSingleton<EnvReadService>();
 
         services.AddSingleton<JobStatus>();
         services.AddSingleton<StationMirrorJob>();
