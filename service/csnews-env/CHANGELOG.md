@@ -1,0 +1,82 @@
+# Changelog
+
+All notable changes to `csnews-env` (named `news_search` up to 0.5.0). Say **why**, not only what.
+
+## [Unreleased]
+
+## [0.6.0] — 2026-11-23 (not deployed)
+
+### Changed
+- **Renamed `news_search` → `csnews-env`** (owner decision): folder `service/csnews-env`, project `CsNews`,
+  image `ghcr.io/balintomsk/csnews-env`, container `csnews-env`, log `logs/csnews-env.log`, status-page service
+  name `csnews-env` (the old `news_search` row goes stale). Option overrides are now `CsNews__…` (were
+  `NewsSearch__…`). The public search routes `/api/v1/newssearch/*`, host port 8091 and cproxy's upstream are
+  unchanged, so no cproxy or portal change is needed.
+- **The whole `docs/` folder is git-ignored** (spec, `api-reference.html`, runbook) — it carries host details.
+
+### Added
+- **The news data API, `/api/v1/csnews/*`: every read and write of the MySQL `news` database moved here from
+  docapi**, so csnews-env is the only service with that database's credentials. docapi 1.44.0 keeps the public
+  `/api/v1/news/*` routes, validation, role rules and caches, and calls this API over the VPC on a miss. Routes:
+  `GET doc/{id}`, `export/{id}`, `list`, `default`, `photo/{id}`, `search` (the SQL LIKE engine), `lake/{id}`,
+  `fish/{id}`, `tagged`, `ping`; `POST doc`, `PUT doc/{id}`, `POST admin/draft`, `POST admin/publish`,
+  `PUT admin/{id}/photo/{index}`. The SQL is docapi 1.43.0's, unchanged (`MySqlNewsStore`), verified against a
+  real MySQL 8.0 loaded from `envfish-db/mysql/` (`MySqlEngineTests`) and end to end from docapi's client.
+- `NewsDbGuard`: one retry for reads (connection faults only), never for writes; one breaker for the database.
+  A database fault is a `503 unavailable` + `Retry-After`, never a 500.
+- `NewsSchemaBootstrap` (moved from docapi's `NewsIndexBootstrap` + `NewsPhotoTriggerBootstrap`): ensures
+  `news.idx_news_publish` and re-creates the two `has_photo0` triggers at startup, in the background,
+  best-effort. `NEWS_SCHEMA_BOOTSTRAP=false` skips it.
+- Config: `MYSQL_NEWS_URL` / `_USERNAME` / `_PASSWORD` (docapi's keys). Unset = the news routes answer 503 and
+  search keeps working.
+
+## [0.5.0] — 2026-11-19 (LIVE on csnode 2026-11-20)
+
+### Added
+- **`requests` in every status message** — the number of searches since the process started, so the admin status page (`stats/Default.aspx`) can show requests per hour / day / month. A running total, not a per-heartbeat delta, so a lost or superseded heartbeat loses no count; adminservice 0.2.0 turns it into 5-minute buckets (`dbo.ServiceRequestCount`). An older adminservice ignores the field.
+
+## [0.4.0] — 2026-10-20
+
+### Added
+- `relevance` (0..100) and `missing` (query words the article lacks) on each item, passed through from news_idx
+  0.6.0. The portal shows them as a percent badge and a "Missing: ..." line, and sorts both engines' hits by
+  percent. Both are null when news_idx is older than 0.6.0.
+
+## [0.3.1] — 2026-10-17 (not deployed)
+
+### Changed
+- **`STATUS_INTERVAL_SECONDS` (env file): heartbeat period, minimum 60 s** (was a 10 s floor). Lower values are raised
+  to 60, so a service never reports to RabbitMQ more often than once a minute; larger values cut traffic further (then
+  raise the page's `ServiceStatusDeadAfterSeconds` to at least 3x). Default unchanged: 60.
+- **`DOTNET_TieredPGO=0` in the image** (was 1). csnode is a 1 GB droplet running five .NET services with about
+  125 MB available; PGO keeps extra instrumented code versions. Measured on waterapi with 1 CPU: about 15 MB less per
+  container. Not a leak fix -- csnode memory was flat over a 4-minute per-process sample; it is simply full.
+
+## [0.3.0] — 2026-10-16 (not deployed)
+
+### Added
+- **Service status for the admin page.** `Status/ServiceStatusReporter` publishes `fishfind.service-status.v1`
+  (`start`, a `heartbeat` every 60 s, `stop` on a clean shutdown) to `fishfind.servicestatus.events` over the
+  RabbitMQ management HTTP API; efcs-backend `adminservice` stores it in `dbo.ServiceStatus` and
+  fishfind-frontend `stats/Default.aspx` shows it. The heartbeat carries the last engine searched (`search vector`), never the query text. Runs only when `RABBITMQ_MANAGEMENT_URL`,
+  `RABBITMQ_USERNAME` and `RABBITMQ_PASSWORD` are set; `STATUS_MACHINE` names the host (in Docker the machine
+  name is the container id). Best-effort: a broker outage is one warning, never a retry loop or a slower start.
+
+## [0.2.0] — 2026-10-16
+
+### Added
+- `bm25` source, `GET /api/v1/newssearch/bm25`, which calls news_idx `/api/v1/newsidx/bm25` (needs news_idx
+  0.3.0). It finds exact words and names that the vector source scores too low. It shares the news_idx HTTP
+  client, so it also shares the 5 s budget, the retry and the breaker: news_idx down = both sources 503.
+  `VectorSource` and `Bm25Source` are now two small subclasses of `NewsIdxSource`.
+
+## [0.1.0] — 2026-10-16
+
+### Added
+- `GET /api/v1/newssearch/sources` and `GET /api/v1/newssearch/{source}`, one endpoint per engine. The page
+  asks every engine in parallel and shows each result set as soon as it arrives, so one slow engine never
+  delays the others.
+- `vector` source: semantic search through news_idx on CTRL, with a 5 s budget, one retry and a circuit
+  breaker. An outage answers 503 on that source only.
+- SQL LIKE search deliberately stays on docapi (jnode) so that either node can fail without blanking the
+  other's results.

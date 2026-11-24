@@ -1,0 +1,20 @@
+# .NET build output
+bin/
+obj/
+publish/
+*.user
+
+# Local runtime logs
+logs/
+
+# Secrets / local env (never commit)
+.env
+secret/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+
+# Service docs (specification, api-reference.html, runbook with host details) stay local -- never in the public repo
+docs/
