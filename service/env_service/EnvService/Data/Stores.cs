@@ -45,4 +45,16 @@ public interface IFishStore
 
     /// <summary><c>env.sp_station_day_trim(from)</c>; returns the rows deleted.</summary>
     Task<int> TrimStationDaysAsync(DateOnly from, CancellationToken ct);
+
+    /// <summary>
+    /// <c>env.sp_push_species</c> (wraps <c>dbo.spPushSpeciesFromLakeToStation</c>): 0 = ran, -1 = the fish model still
+    /// runs on the legacy path (<c>env.Setting probability_source</c> is not <c>env</c>).
+    /// </summary>
+    Task<int> PushSpeciesAsync(CancellationToken ct);
+
+    /// <summary>
+    /// <c>env.sp_update_probability</c>: rows of <c>fish_location.today</c> changed; -1 = legacy path (nothing written);
+    /// -2 = another run holds the lock.
+    /// </summary>
+    Task<int> UpdateProbabilityAsync(CancellationToken ct);
 }

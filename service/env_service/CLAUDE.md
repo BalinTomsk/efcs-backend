@@ -21,10 +21,11 @@ Deploy runbook: `docs/do-update.md`. Endpoint contracts: `docs/api-reference.htm
   database change read `c:\envoinx\fishfind\envfish-db\AGENTS.md` (test-first; edit `scriptNN_*.sql`).
 - **Connections:** `MYSQL_URL`/`MYSQL_USERNAME`/`MYSQL_PASSWORD` = envdata, `DB_URL`/`DB_USERNAME`/`DB_PASSWORD` = SQL
   Server; both required. Pressure is mm Hg everywhere.
-- **Shadow until plan step 5:** the hand-over fills `env.StationState` / `env.StationDay`, which nothing reads yet,
-  and does NOT run the fish procedures (the Java weather service still does). Do not add them before step 5.
+- **The fish model is behind a switch (plan step 5):** the hand-over calls `env.sp_push_species` and
+  `env.sp_update_probability`, which do nothing until SQL Server's `env.Setting probability_source` is `env`; then the
+  legacy `dbo.spTotalUpdateProbability` returns at once. Never bypass the switch from C#.
 - **A failure never loses work:** pending `job_run` cycles are marked handed over only after every push succeeded.
-- **Startup lines at `Information`** (`env_service … starting`, `Station mirror started`, `Hand-over started (shadow)`,
+- **Startup lines at `Information`** (`env_service … starting`, `Station mirror started`, `Hand-over started`,
   each job's `… done`), so a deploy is verified without Debug.
 - **Ports:** 8080 public (`/health`; later `/api/v1/env/*`), 8081 private (`/health/live`, `/health/ready`, `/metrics`,
   `/admin/*`), split by `Connection.LocalPort`, never `RequireHost`. Never publish 8081 beyond localhost.
