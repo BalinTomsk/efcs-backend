@@ -61,7 +61,7 @@ try
     app.UseResponseCompression();
 
     EnvConnections connections = app.Services.GetRequiredService<EnvConnections>();
-    Log.Information("env_service {Version} starting. envdata={EnvData} sqlserver={SqlServer} mode=shadow",
+    Log.Information("env_service {Version} starting. envdata={EnvData} sqlserver={SqlServer}",
         AppInfo.Version, new MySqlConnector.MySqlConnectionStringBuilder(connections.EnvData).Server,
         new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(connections.SqlServer).DataSource);
     Log.Information("Service status reporting {State}.", statusReporting ? "on" : "off (RABBITMQ_* not set)");

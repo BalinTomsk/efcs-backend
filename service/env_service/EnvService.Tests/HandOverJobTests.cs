@@ -67,6 +67,21 @@ internal sealed class FakeFish : IFishStore
     public List<DateOnly> Trims { get; } = [];
     public List<StationMaster> Stations { get; } = [];
     public Exception? FailDays { get; set; }
+    public int SpeciesResult { get; set; } = -1;
+    public int ProbabilityResult { get; set; } = 1234;
+    public List<string> FishCalls { get; } = [];
+
+    public Task<int> PushSpeciesAsync(CancellationToken ct)
+    {
+        FishCalls.Add("species");
+        return Task.FromResult(SpeciesResult);
+    }
+
+    public Task<int> UpdateProbabilityAsync(CancellationToken ct)
+    {
+        FishCalls.Add("probability");
+        return Task.FromResult(ProbabilityResult);
+    }
 
     public Task<IReadOnlyList<StationMaster>> StationListAsync(CancellationToken ct) =>
         Task.FromResult((IReadOnlyList<StationMaster>)Stations.ToList());
@@ -134,6 +149,31 @@ public class HandOverJobTests
         await Assert.That(env.PressureCalls).IsEqualTo(1);
         await Assert.That(status.Get(HandOverJob.Name)!.LastOk).IsEqualTo(true);
         await Assert.That(status.Get(HandOverJob.Name)!.LastResult!).Contains("cycles=2 flow=7 pressure=0-or-fresh states=3 days=5");
+        await Assert.That(status.Get(HandOverJob.Name)!.LastResult!).Contains("probability=legacy");
+    }
+
+    [Test]
+    public async Task LegacySource_RunsOnlyTheSpeciesCheck_NotTheProbabilityUpdate()
+    {
+        // env.sp_push_species answers -1 while env.Setting probability_source is legacy: then the update is not called.
+        var (job, _, fish, _, _) = Make();
+        await job.RunOnceAsync(force: true, CancellationToken.None);
+
+        await Assert.That(fish.FishCalls).IsEquivalentTo(new[] { "species" });
+    }
+
+    [Test]
+    public async Task EnvSource_PushesSpeciesThenUpdatesProbability_AfterThePushes()
+    {
+        var (job, env, fish, status, _) = Make();
+        env.States.Add(State(1));
+        fish.SpeciesResult = 0;
+
+        await job.RunOnceAsync(force: true, CancellationToken.None);
+
+        await Assert.That(fish.FishCalls).IsEquivalentTo(new[] { "species", "probability" });
+        await Assert.That(fish.StateBatches).HasCount().EqualTo(1);
+        await Assert.That(status.Get(HandOverJob.Name)!.LastResult!).Contains("probability=1234");
     }
 
     [Test]
@@ -199,6 +239,8 @@ public class HandOverJobTests
         await Assert.That(HandOverJob.Describe(new FillResult(0))).IsEqualTo("0-or-fresh");
         await Assert.That(HandOverJob.Describe(new FillResult(-1))).IsEqualTo("locked");
         await Assert.That(HandOverJob.Describe(new FillResult(42))).IsEqualTo("42");
+        await Assert.That(HandOverJob.DescribeProbability(-1)).IsEqualTo("legacy");
+        await Assert.That(HandOverJob.DescribeProbability(-2)).IsEqualTo("locked");
     }
 }
 

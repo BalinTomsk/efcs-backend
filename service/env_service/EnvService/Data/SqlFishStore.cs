@@ -53,6 +53,22 @@ public sealed class SqlFishStore(string connectionString, ResiliencePipelineProv
             return Convert.ToInt32(await command.ExecuteScalarAsync(token) ?? 0);
         }, ct).AsTask();
 
+    public Task<int> PushSpeciesAsync(CancellationToken ct) => ScalarProcAsync("env.sp_push_species", 1800, ct);
+
+    public Task<int> UpdateProbabilityAsync(CancellationToken ct) => ScalarProcAsync("env.sp_update_probability", 1800, ct);
+
+    /// <summary>A parameterless env procedure whose first result column is its outcome. Long timeout: the species push
+    /// and the probability update scan all ~237,000 fish_location rows.</summary>
+    private Task<int> ScalarProcAsync(string procedure, int timeoutSeconds, CancellationToken ct) =>
+        _sql.ExecuteAsync(async token =>
+        {
+            await using var connection = new SqlConnection(connectionString);
+            await connection.OpenAsync(token);
+            await using var command = new SqlCommand(procedure, connection)
+            { CommandType = CommandType.StoredProcedure, CommandTimeout = timeoutSeconds };
+            return Convert.ToInt32(await command.ExecuteScalarAsync(token) ?? 0);
+        }, ct).AsTask();
+
     private Task<int> PushAsync(string procedure, string typeName, DataTable table, CancellationToken ct) =>
         _sql.ExecuteAsync(async token =>
         {

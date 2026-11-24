@@ -5,7 +5,7 @@ using Microsoft.Extensions.Options;
 namespace EnvService.Jobs;
 
 /// <summary>
-/// The hand-over from envdata to SQL Server (plan step 4, SHADOW: nothing in SQL Server reads <c>env.*</c> yet).
+/// The hand-over from envdata to SQL Server (plan steps 4-5).
 /// Every <see cref="EnvOptions.HandOverPollSeconds"/> it looks for finished ingest cycles (<c>v_job_run_pending</c>);
 /// when there is one, or the last hand-over is older than <see cref="EnvOptions.HandOverMaxAgeMinutes"/>, it:
 /// <list type="number">
@@ -14,11 +14,13 @@ namespace EnvService.Jobs;
 /// <item>pushes <c>v_station_state</c> → <c>env.sp_push_station_state</c> and <c>v_station_day</c> →
 /// <c>env.sp_push_station_day</c>, <see cref="EnvOptions.PushBatchSize"/> rows per call;</item>
 /// <item>trims <c>env.StationDay</c> before today − 3 (<c>env.sp_station_day_trim</c>);</item>
+/// <item>runs the fish model on the env path: <c>env.sp_push_species</c>, then <c>env.sp_update_probability</c> (plan
+/// step 5). Both do nothing (-1, logged <c>probability=legacy</c>) until <c>env.Setting probability_source</c> is
+/// <c>env</c>; until then the Java weather service runs <c>dbo.spTotalUpdateProbability</c>;</item>
 /// <item>marks the pending cycles handed over (<c>sp_job_run_handed_over</c>) — only after every push succeeded, so a
 /// failure leaves them pending and the next poll retries.</item>
 /// </list>
-/// The fish update (<c>spPushSpeciesFromLakeToStation</c>, <c>spTotalUpdateProbability</c>) is NOT run here yet: the
-/// Java weather service still runs it during the shadow period (plan step 5 moves it).
+/// The switch lives in SQL Server, so the cut-over and its rollback are one UPDATE each, with no deploy.
 /// </summary>
 public sealed class HandOverJob(
     IEnvStore env, IFishStore fish, JobStatus status, IOptions<EnvOptions> options, TimeProvider clock,
@@ -36,7 +38,7 @@ public sealed class HandOverJob(
             return;
         }
         TimeSpan every = TimeSpan.FromSeconds(Math.Max(30, options.Value.HandOverPollSeconds));
-        log.LogInformation("Hand-over started (shadow). poll={Seconds}s maxAge={Minutes}min",
+        log.LogInformation("Hand-over started. poll={Seconds}s maxAge={Minutes}min",
             (int)every.TotalSeconds, options.Value.HandOverMaxAgeMinutes);
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -100,11 +102,14 @@ public sealed class HandOverJob(
             }
 
             int trimmed = await fish.TrimStationDaysAsync(DateOnly.FromDateTime(now).AddDays(-3), ct);
+            int species = await fish.PushSpeciesAsync(ct);
+            int probability = species < 0 ? -1 : await fish.UpdateProbabilityAsync(ct);
             int marked = pending.Count == 0 ? 0 : await env.MarkHandedOverAsync(pending.Max(p => p.JobRunId), ct);
 
             string result = $"cycles={marked} flow={Describe(flow)} pressure={Describe(pressure)} " +
-                            $"states={statesPushed} days={daysPushed} trimmed={trimmed} in {sw.Elapsed.TotalSeconds:F1}s";
-            log.LogInformation("Hand-over done (shadow). {Result}", result);
+                            $"states={statesPushed} days={daysPushed} trimmed={trimmed} probability={DescribeProbability(probability)} " +
+                            $"in {sw.Elapsed.TotalSeconds:F1}s";
+            log.LogInformation("Hand-over done. {Result}", result);
             _lastSuccessUtc = now;
             status.Succeeded(Name, result);
         }
@@ -123,6 +128,13 @@ public sealed class HandOverJob(
         }
         return status.Get(Name);
     }
+
+    internal static string DescribeProbability(int r) => r switch
+    {
+        -1 => "legacy",
+        -2 => "locked",
+        _ => r.ToString(System.Globalization.CultureInfo.InvariantCulture),
+    };
 
     internal static string Describe(FillResult r) => r.Locked ? "locked" : r.Skipped ? "0-or-fresh" : r.Count.ToString();
 }

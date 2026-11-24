@@ -4,18 +4,19 @@ The water/weather service of FishFind (C# / .NET 10). It will serve every water,
 the MySQL `envdata` database and hand the fish-model input over to SQL Server. Plan and status:
 `docs/env_service_plan.md` (git-ignored; workstation only). Schema: `envfish-db/mysql/envdata`.
 
-**Built so far:** `EnvService` 0.1.0 (plan step 4: station mirror + shadow hand-over) and `EnvService.Migrator`
+**Built so far:** `EnvService` 0.2.0 (plan steps 4-5: station mirror, hand-over, fish model behind a switch) and `EnvService.Migrator`
 (step 3, one-off). The REST API (`/api/v1/env/*`) comes with step 6.
 
-## EnvService 0.1.0 — two background jobs
+## EnvService 0.2.0 — two background jobs
 
 - **mirror** (startup, then hourly): SQL Server `env.fn_station_list()` → envdata `sp_station_mirror` (~11,700
   stations, `hasFish` included).
 - **handover** (polls every 5 min; runs when a collector recorded a cycle in `job_run`, or at least hourly):
   `sp_fill_flow_state` + `sp_fill_pressure_state` in envdata, then `v_station_state` → `env.sp_push_station_state` and
   `v_station_day` → `env.sp_push_station_day` (1,000 rows per table-valued parameter), `env.sp_station_day_trim`, and
-  finally `sp_job_run_handed_over`. **Shadow:** nothing in SQL Server reads `env.*` yet, and the fish procedures are
-  not run here (plan step 5).
+  then `env.sp_push_species` + `env.sp_update_probability`, and finally `sp_job_run_handed_over`. The fish model runs
+  here only once SQL Server's `env.Setting probability_source` is `env` (step 5 cut-over); until then those two answer
+  -1 and the Java weather service runs it.
 
 | Port | Paths |
 |---|---|

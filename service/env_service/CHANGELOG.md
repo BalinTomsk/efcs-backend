@@ -6,6 +6,11 @@ All notable changes go in this file, newest first, with the reason. Format:
 ## [Unreleased]
 
 ### Added
+- **EnvService 0.2.0** (2026-11-25, built, not deployed): plan step 5. After every hand-over the job runs the fish model
+  on the env path: `env.sp_push_species`, then `env.sp_update_probability` (`fish_location.today` from `env.StationState`
+  / `env.StationDay`). Both do nothing (-1, `probability=legacy` in the result line) until SQL Server's
+  `env.Setting probability_source` is `env`; then the Java weather service's `dbo.spTotalUpdateProbability` returns at
+  once. So the cut-over and its rollback are one UPDATE each, with no deploy. The job is no longer labelled shadow.
 - **EnvService 0.1.0** (2026-11-25, built, not deployed): plan step 4. Two background jobs: **mirror** (SQL Server
   `env.fn_station_list()` → envdata `sp_station_mirror`, at startup and hourly) and **handover** in SHADOW mode (flow +
   pressure fills in envdata, then `v_station_state` / `v_station_day` pushed into SQL Server `env.StationState` /
