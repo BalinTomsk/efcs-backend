@@ -1,6 +1,6 @@
 using System.Data;
-using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Logging;
+using MySqlConnector;
 using Polly;
 using Polly.Registry;
 using WeatherService.Configuration;
@@ -8,19 +8,19 @@ using WeatherService.Configuration;
 namespace WeatherService.Data;
 
 /// <summary>
-/// Persists raw weather payloads into the legacy <c>dbo.ows_meteo</c> table and runs the
-/// post-processing procedures used by the original service. All SQL work goes through the <c>sql</c>
-/// resilience pipeline (retry + circuit breaker).
+/// Persists weather payloads into the MySQL <c>envdata</c> database through its procedures
+/// (<c>envfish-db/mysql/envdata/script02_Proc.sql</c>; no table is touched directly), records each finished cycle in
+/// <c>job_run</c> and runs the weather retention. All SQL work goes through the <c>sql</c> resilience pipeline
+/// (retry + circuit breaker).
 ///
-/// <para>The direct <c>UPDATE dbo.ows_meteo</c> below is an intentional, grandfathered exception to
-/// the house rule that application code goes through a view/function/procedure rather than a raw
-/// table: it mirrors the legacy <c>WeatherDataWorkerOpen</c> .NET service exactly, and the rule only
-/// applies to methods added or changed going forward. If a save procedure for this table (e.g.
-/// <c>spSaveStationWeather</c>) is ever introduced, switch this method to call it rather than writing
-/// a new raw-table statement elsewhere.</para>
+/// <para>Until 10.5.0 this wrote <c>dbo.ows_meteo</c> on SQL Server with a raw <c>UPDATE</c> and a trigger shredded it;
+/// <c>sp_weather_save</c> now does both in one call, and stores pressure in mm Hg.</para>
 /// </summary>
 public class WeatherDataRepository
 {
+    /// <summary><c>job_run.service</c> of this service's cycles.</summary>
+    public const string ServiceName = "weather";
+
     private readonly ISqlConnectionFactory _connectionFactory;
     private readonly ResiliencePipeline _sql;
     private readonly ILogger<WeatherDataRepository> _log;
@@ -36,14 +36,11 @@ public class WeatherDataRepository
     }
 
     /// <summary>
-    /// Stores one station's payload and records WHICH PROVIDER produced it in <c>type</c>. A blank
-    /// payload is a no-op; a payload for an <c>mli</c> with no matching row is logged and dropped, as
-    /// there is nothing to update.
-    ///
-    /// <para><c>type</c> used to be hardcoded to 2 for every provider, which made the column useless as
-    /// provenance and forced <c>dbo.TR_ows_meteo</c> to infer the document's shape — four providers'
-    /// payloads were indistinguishable from Open-Meteo and were silently discarded. Callers now pass
-    /// their own <see cref="WeatherService.Canonical.WeatherSourceType"/>.</para>
+    /// Stores one station's payload and the PROVIDER that produced it (<c>sp_weather_save(mli, type, json)</c>): the
+    /// raw document is kept in <c>weather_raw</c> (newest per station), and a canonical
+    /// <c>fishfind.weather.forecast/v1</c> envelope is shredded into <c>weather_day</c> (one row per date;
+    /// <c>pressureHpa</c> converted to mm Hg). A blank payload is a no-op. A station envdata does not know is logged
+    /// and the payload dropped, as an unmatched <c>ows_meteo</c> row was before.
     /// </summary>
     /// <param name="sourceType">provider identity; see <c>WeatherSourceType</c></param>
     public virtual async Task SaveStationDataAsync(
@@ -58,49 +55,71 @@ public class WeatherDataRepository
             return;
         }
 
-        int rows = await _sql.ExecuteAsync(async token =>
+        int days;
+        try
         {
-            await using SqlConnection connection = await _connectionFactory.OpenAsync(token).ConfigureAwait(false);
-            await using var command = connection.CreateCommand();
-            command.CommandType = CommandType.Text;
-            command.CommandText = "UPDATE dbo.ows_meteo SET type = @type, ows = @ows, stamp = GETDATE() WHERE mli = @mli";
-            command.Parameters.Add("@type", SqlDbType.Int).Value = sourceType;
-            command.Parameters.Add("@ows", SqlDbType.NVarChar, -1).Value = jsonData;
-            command.Parameters.Add("@mli", SqlDbType.NVarChar, 128).Value = mli;
-            return await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
-        }, ct).ConfigureAwait(false);
+            days = await _sql.ExecuteAsync(async token =>
+            {
+                await using MySqlConnection connection = await _connectionFactory.OpenAsync(token).ConfigureAwait(false);
+                await using var command = connection.CreateCommand();
+                command.CommandType = CommandType.Text;
+                command.CommandText = "CALL sp_weather_save(@mli, @type, @json, @out_days); SELECT @out_days";
+                command.Parameters.Add("@mli", MySqlDbType.VarChar, 64).Value = mli;
+                command.Parameters.Add("@type", MySqlDbType.Byte).Value = (sbyte)sourceType;
+                command.Parameters.Add("@json", MySqlDbType.MediumText).Value = jsonData;
+                object? result = await command.ExecuteScalarAsync(token).ConfigureAwait(false);
+                return result is null or DBNull ? -1 : Convert.ToInt32(result);
+            }, ct).ConfigureAwait(false);
+        }
+        catch (MySqlException ex) when (ex.SqlState == "45000")
+        {
+            _log.LogWarning("Station unknown to envdata; payload dropped. mli={Mli} bytes={Bytes}", mli, jsonData.Length);
+            return;
+        }
 
-        if (rows == 0)
+        if (days < 0)
         {
-            _log.LogWarning("No ows_meteo row matched; payload dropped. mli={Mli} bytes={Bytes}", mli, jsonData.Length);
+            _log.LogWarning("Payload stored but not shredded (not a fishfind.weather.forecast/v1 envelope). "
+                + "mli={Mli} type={Type} bytes={Bytes}", mli, sourceType, jsonData.Length);
         }
     }
 
-    /// <summary>Pushes lake species associations down to stations (<c>dbo.spPushSpeciesFromLakeToStation</c>).</summary>
-    public virtual Task PushSpeciesFromLakeToStationAsync(CancellationToken ct = default) =>
-        ExecuteProcedureAsync("dbo.spPushSpeciesFromLakeToStation", ct);
-
-    /// <summary>Recomputes catch probabilities (<c>dbo.spTotalUpdateProbability</c>).</summary>
-    public virtual Task TotalUpdateProbabilityAsync(CancellationToken ct = default) =>
-        ExecuteProcedureAsync("dbo.spTotalUpdateProbability", ct);
-
-    /// <summary>Deletes stale weather data after each cycle (<c>dbo.sp_clean_old_weather_data</c>).</summary>
-    public virtual Task CleanOldWeatherDataAsync(CancellationToken ct = default) =>
-        ExecuteProcedureAsync("dbo.sp_clean_old_weather_data", ct);
-
-    private async Task ExecuteProcedureAsync(string procedure, CancellationToken ct)
+    /// <summary>
+    /// Records one finished cycle in envdata's <c>job_run</c> (<c>sp_job_run_record</c>). env_service picks unhanded
+    /// cycles up and does the fish hand-over to SQL Server, which this service did itself until 10.5.0.
+    /// </summary>
+    public virtual async Task RecordCycleAsync(
+        string job, DateTime startedUtc, DateTime finishedUtc, string status, int items, string? note,
+        CancellationToken ct = default)
     {
         await _sql.ExecuteAsync(async token =>
         {
-            await using SqlConnection connection = await _connectionFactory.OpenAsync(token).ConfigureAwait(false);
+            await using MySqlConnection connection = await _connectionFactory.OpenAsync(token).ConfigureAwait(false);
             await using var command = connection.CreateCommand();
-            command.CommandType = CommandType.StoredProcedure;
-            command.CommandText = procedure;
-            // These procedures have no timeout budget of their own and can run for minutes over the full
-            // station set; the default 30s would abort them mid-run.
-            command.CommandTimeout = 0;
-            // ExecuteNonQuery runs the whole batch and tolerates procedures that emit incidental result
-            // sets or update counts (they are simply discarded), matching the Java result-set draining.
+            command.CommandType = CommandType.Text;
+            command.CommandText =
+                "CALL sp_job_run_record(@service, @job, @started, @finished, @status, @items, @note, @out_job_run_id)";
+            command.Parameters.Add("@service", MySqlDbType.VarChar, 32).Value = ServiceName;
+            command.Parameters.Add("@job", MySqlDbType.VarChar, 32).Value = job;
+            command.Parameters.Add("@started", MySqlDbType.DateTime).Value = startedUtc;
+            command.Parameters.Add("@finished", MySqlDbType.DateTime).Value = finishedUtc;
+            command.Parameters.Add("@status", MySqlDbType.VarChar, 16).Value = status;
+            command.Parameters.Add("@items", MySqlDbType.Int32).Value = items;
+            command.Parameters.Add("@note", MySqlDbType.VarChar, 255).Value =
+                note is null ? DBNull.Value : (note.Length > 255 ? note[..255] : note);
+            await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Weather retention: <c>sp_clean_old_weather_data(NULL)</c> deletes days older than 15 days back.</summary>
+    public virtual async Task CleanOldWeatherDataAsync(CancellationToken ct = default)
+    {
+        await _sql.ExecuteAsync(async token =>
+        {
+            await using MySqlConnection connection = await _connectionFactory.OpenAsync(token).ConfigureAwait(false);
+            await using var command = connection.CreateCommand();
+            command.CommandType = CommandType.Text;
+            command.CommandText = "CALL sp_clean_old_weather_data(NULL)";
             await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
     }

@@ -2,22 +2,19 @@
 
 C# / .NET 10 port of the Java/Spring Boot `water-station-pusher` (`efj-backend/service/waterservice`). A
 cross-platform worker that pulls hydrometric data for **all** Canadian (Environment Canada CSV) and US
-(USGS Water Data API) stations and upserts it into the FishFind SQL Server via the legacy stored procedures,
-running in Docker on **Debian 13**.
+(USGS Water Data API) stations and upserts it, since 11.0.0, into the MySQL **`envdata`** database (debian-mysql,
+schema `envfish-db/mysql/envdata`) through its procedures, running in Docker on **Debian 13**. It no longer talks
+to SQL Server: env_service hands the data over to the fish model there (plan:
+`efcs-backend/service/env_service/docs/env_service_plan.md`).
 
-## Dual-service redundancy (Java + C#) — do NOT retire either
+## Java twin: shadow period, then retired (changed 2026-11-24)
 
-**Two independent implementations of this service run in parallel in production, by design.** This C# port
-and the original **Java (Spring Boot)** service (`efj-backend/service/waterservice`) both poll the same
-Environment Canada / USGS feeds *independently* and upsert into the **same** database. This is an
-**intentional "double warranty"** on incoming data — redundancy, **not** a migration. **Keep both running;
-do not decommission either one to "avoid double-writes."**
-
-Why running both is safe: writes go through `dbo.sp_UpdateWaterData`, keyed by `(mli, stamp)` as an upsert,
-so concurrent writes from the two services collapse to the same rows. If one pipeline is down, slow, or a
-feed fetch fails on one side, the other still lands the data. The post-processing procs
-(`dbo.sp_clean_old_water_data`, `dbo.spPushSpeciesFromLakeToStation`) therefore run once per service per
-cycle; that duplication is expected and tolerated.
+Until 10.8.0 this C# port and the **Java (Spring Boot)** service (`efj-backend/service/waterservice`) both wrote
+the same SQL Server tables as a "double warranty". **That ended with the move to MySQL (user decision
+2026-11-24):** from 11.0.0 this service writes MySQL `envdata`; the Java service keeps writing SQL Server during
+the **shadow period** (comparison and fallback, and it still runs the species push there) and is retired at
+cut-over (plan step 7). The two no longer share any state: not the readings, not the 503 back-off. During the
+shadow period each pair uses its **own USGS API key** (the key's 1,000/h is per key).
 
 ## Changelog — use `CHANGELOG.md`
 
@@ -100,15 +97,14 @@ to verify the fix; run `mssql\UNIT_TESTS\autorun.bat`). That file lives in the s
 
 ## Goal
 
-- Poll supported Canadian and US water stations from MSSQL (`vwWaterStation`).
+- Poll supported Canadian and US water stations from envdata (`v_station_water_due`).
 - Download each **CA** station's hourly hydrometric CSV from Environment Canada.
 - Read each **US** station's latest values from one USGS Water Data API snapshot per cycle
   (`latest-continuous`; key in `USGS_API_KEY`). The legacy WaterServices feed dies 2027-02-22.
-- Parse readings and upsert them into `dbo.WaterData`.
-- After each worker cycle, synchronously run stale-data cleanup:
-  1. `dbo.sp_clean_old_water_data`
-- When at least one station succeeds in a cycle, also run:
-  1. `dbo.spPushSpeciesFromLakeToStation`
+- Parse readings and upsert them through `sp_water_save_ca` / `sp_water_save_us` (envdata `water_reading`).
+- After each worker cycle, synchronously run retention: `sp_clean_old_water_data`.
+- When at least one station succeeds in a cycle, record it in `job_run` (`sp_job_run_record`); env_service does
+  the fish hand-over to SQL Server from there.
 - Log failures and skipped unpublished-source events; **do not disable stations automatically**.
 
 ---
@@ -117,13 +113,14 @@ to verify the fix; run `mssql\UNIT_TESTS\autorun.bat`). That file lives in the s
 
 - **Source of truth:** `docs/specification.md` (full spec — keep it in sync with the code). `README.md` for
   build/run. Deployment runbook: `docs/do-update.md`. Release history: `CHANGELOG.md`.
-- **Stack:** Microsoft.Data.SqlClient (no ORM), Polly (retry + circuit breaker), CsvHelper, Cronos, Serilog
+- **Stack:** MySqlConnector (no ORM), Polly (retry + circuit breaker), CsvHelper, Cronos, Serilog
   (JSON, 7-day rolling file), prometheus-net. Host: Generic Host + minimal ASP.NET Core.
 - **Layout:** `Program.cs` (web mode + `--console` one-shot); `Processing/StationWorker.cs` (cron scheduler,
   parallel CA/US passes, `RunOnStartup`); `Sources/` (CA CSV fetcher + USGS Water Data API client); `Processing/` (station
-  processors; `UsgsParameterMap` keeps the legacy USGS names the proc expects); `Data/` (repositories calling the same procs: `sp_UpdateWaterData`,
-  `sp_push_us_water_data`, `sp_clean_old_water_data`, `spPushSpeciesFromLakeToStation`); `Configuration/`
-  (options, `.env` loader, JDBC→SqlClient converter, Polly pipelines); `Web/` (`/health`, metrics, DB check).
+  processors; `UsgsParameterMap` keeps the legacy USGS names the proc expects); `Data/` (repositories calling the
+  envdata procs `sp_water_save_ca`, `sp_water_save_us`, `sp_station_503_*`, `sp_job_run_record`,
+  `sp_clean_old_water_data`); `Configuration/` (options, `.env` loader, `MySqlUrl`, Polly pipelines); `Web/`
+  (`/health`, metrics, DB check).
 - **Endpoints:** `/health` on **8080** (public probe); metrics + liveness/readiness on **8081** (private,
   never publish).
 
@@ -141,14 +138,21 @@ the whole reason those types are open — keep them that way, and prefer overrid
 or DI indirection.
 
 Docker: multi-stage build publishing a **self-contained linux-x64** app onto `debian:trixie-slim`
-(GA .NET 10 has no Debian-trixie base image), non-root uid 10001. **Do not set `InvariantGlobalization`** —
-Microsoft.Data.SqlClient requires ICU (`libicu76` is installed in the image).
+(GA .NET 10 has no Debian-trixie base image), non-root uid 10001. **Do not set `InvariantGlobalization`**
+(platform rule; `libicu76` is installed in the image).
+
+**Engine tests:** `WaterEngineTests` runs the real repositories against a real MySQL when `WATER_TEST_MYSQL` holds a
+connection string of a THROWAWAY database built from `envfish-db/mysql/envdata`; otherwise its tests are no-ops.
+Any change to SQL text must be run that way (a fake never parses SQL).
 
 ## Secrets
 
-DB credentials come from `DB_URL` / `DB_USERNAME` / `DB_PASSWORD` (real environment variables, or a local
-`.env` as a lowest-precedence fallback). `DB_URL` may be a JDBC-style URL (converted to a SqlClient
-connection string) for parity with the other backend services. **Never commit real credentials** — committed
+The envdata credentials come from **`MYSQL_URL` / `MYSQL_USERNAME` / `MYSQL_PASSWORD`** (real environment variables,
+or a local `.env` as a lowest-precedence fallback). `MYSQL_URL` is `jdbc:mysql://<host>:3306/envdata?sslMode=REQUIRED`
+or a native MySqlConnector string (`Configuration/MySqlUrl.cs`). The MySQL account (`waterservice`) has EXECUTE on
+`envdata` only and requires TLS. **`DB_URL` / `DB_USERNAME` / `DB_PASSWORD` stay in the same env file as the SQL
+Server connection** (user rule 2026-11-25: the file carries both); 11.0.0 does not open it, 10.x did, so a rollback
+needs no file change. **Never commit real credentials** — committed
 files and `docs/*` use placeholders only. On the droplet the secret is a volume-mounted file read via
 `DOTENV_PATH`.
 

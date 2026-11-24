@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="EnvService/EnvService.csproj" />
+  <Project Path="EnvService.Tests/EnvService.Tests.csproj" />
+  <Project Path="EnvService.Migrator/EnvService.Migrator.csproj" />
+  <Project Path="EnvService.Migrator.Tests/EnvService.Migrator.Tests.csproj" />
+</Solution>

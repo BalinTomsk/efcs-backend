@@ -17,7 +17,7 @@ public static class ServiceRegistration
     {
         services.Configure<WorkerOptions>(configuration.GetSection(WorkerOptions.SectionName));
 
-        // Datasource: one connection string (SqlClient pools the physical connections).
+        // Datasource: one MySQL envdata connection string (MySqlConnector pools the physical connections).
         string connectionString = BuildConnectionString(configuration);
         services.AddSingleton<ISqlConnectionFactory>(new SqlConnectionFactory(connectionString));
 
@@ -60,18 +60,22 @@ public static class ServiceRegistration
     }
 
     /// <summary>
-    /// Builds the SqlClient connection string from the shared <c>DB_URL</c>/<c>DB_USERNAME</c>/<c>DB_PASSWORD</c>
-    /// configuration (JDBC-style URL supported for parity with the other backend services).
+    /// Builds the MySqlConnector connection string to the envdata database from <c>MYSQL_URL</c> /
+    /// <c>MYSQL_USERNAME</c> / <c>MYSQL_PASSWORD</c> (<c>jdbc:mysql://</c> URL or native connection string; see
+    /// <see cref="MySqlUrl"/>). These are deliberately NOT <c>DB_URL</c> / <c>DB_USERNAME</c> / <c>DB_PASSWORD</c>: the
+    /// same env file keeps those for the SQL Server connection, so both connections live side by side and a rollback to
+    /// 10.x needs no file change.
     /// </summary>
     public static string BuildConnectionString(IConfiguration configuration)
     {
-        string? dbUrl = configuration["DB_URL"];
-        if (string.IsNullOrWhiteSpace(dbUrl))
+        string? url = configuration["MYSQL_URL"];
+        if (string.IsNullOrWhiteSpace(url))
         {
             throw new InvalidOperationException(
-                "DB_URL is not configured. Set it as an environment variable or in a local .env file.");
+                "MYSQL_URL is not configured (the envdata MySQL connection). Set it as an environment variable or in "
+                + "a local .env file; DB_URL is the SQL Server connection and is not used for envdata.");
         }
 
-        return JdbcConnectionString.Build(dbUrl, configuration["DB_USERNAME"], configuration["DB_PASSWORD"]);
+        return MySqlUrl.Build(url, configuration["MYSQL_USERNAME"], configuration["MYSQL_PASSWORD"]);
     }
 }

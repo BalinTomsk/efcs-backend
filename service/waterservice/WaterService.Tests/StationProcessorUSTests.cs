@@ -15,14 +15,15 @@ public class StationProcessorUSTests
     [Test]
     public async Task BuildReadings_UsesLegacyNameAndUnit()
     {
-        // sp_push_us_water_data keys its unit conversion on the exact legacy unit string ('ft^3/s').
+        // sp_water_save_us keys its unit conversion on the exact legacy unit string ('ft^3/s').
         List<UsSeriesReading> series = StationProcessorUS.BuildReadings(
             [Obs("00060", "2026-10-11T18:00:00+00:00", "12.5")], Mountain);
 
         await Assert.That(series).HasCount().EqualTo(1);
         await Assert.That(series[0].Name).IsEqualTo("Streamflow");
         await Assert.That(series[0].Unit).IsEqualTo("ft^3/s");
-        await Assert.That(series[0].XmlDoc).IsEqualTo("<root><a d=\"2026-10-11\" v=\"12.5\" /></root>");
+        await Assert.That(series[0].Day).IsEqualTo(new DateOnly(2026, 10, 11));
+        await Assert.That(series[0].Value).IsEqualTo(12.5);
     }
 
     [Test]
@@ -33,7 +34,8 @@ public class StationProcessorUSTests
         List<UsSeriesReading> series = StationProcessorUS.BuildReadings(
             [Obs("00065", "2026-10-11T03:00:00+00:00", "3.34")], Mountain);
 
-        await Assert.That(series[0].XmlDoc).IsEqualTo("<root><a d=\"2026-10-10\" v=\"3.34\" /></root>");
+        await Assert.That(series[0].Day).IsEqualTo(new DateOnly(2026, 10, 10));
+        await Assert.That(series[0].Value).IsEqualTo(3.34);
     }
 
     [Test]

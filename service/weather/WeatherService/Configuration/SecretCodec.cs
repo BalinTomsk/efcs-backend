@@ -26,7 +26,7 @@ namespace WeatherService.Configuration;
 ///
 /// <para>A missing or wrong key when an encrypted value is actually present is a <em>hard startup
 /// failure</em>, never a silent pass-through: handing an untouched <c>enc:v1:...</c> string to the
-/// SqlClient driver would surface as a baffling login error far from the real cause.</para>
+/// MySQL driver would surface as a baffling login error far from the real cause.</para>
 /// </summary>
 public static class SecretCodec
 {

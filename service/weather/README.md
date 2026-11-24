@@ -23,9 +23,10 @@ Running a metered worker without its key would fail every station it touched, dr
 failure rate past the threshold and suppressing post-processing for a country whose other providers were
 fine.
 
-Each cycle reserves its slice of that provider's daily API budget, reads stations from
-`dbo.vwWeatherForecastToDay`, fetches each station's payload, and stores it **verbatim** into
-`dbo.ows_meteo` with `type = 2` — nothing parses the JSON.
+Each cycle reserves its slice of that provider's daily API budget, reads stations from envdata
+(`sp_station_weather_due`), fetches each station's payload, converts it to the canonical envelope where the
+provider has a forecast, and saves it with `sp_weather_save` (MySQL `envdata`; pressure stored in mm Hg). A healthy
+cycle is recorded in `job_run` for env_service, which does the fish hand-over to SQL Server.
 
 Requests are paced per provider: `<PROVIDER>_TIMEOUT` seconds between calls, or — when that is `0` or
 absent — that provider's `<PROVIDER>_DAILY_LIMIT` spread evenly over 12 hours.
@@ -62,7 +63,10 @@ Port **8081** only — the same paths Spring Actuator served, so existing probes
 ## Configuration
 
 Copy `.env.example` to `.env`, or inject the same variables as real environment variables (they win).
-`DB_URL` accepts either the shared `jdbc:sqlserver://…` URL or a native SqlClient connection string.
+`MYSQL_URL` / `MYSQL_USERNAME` / `MYSQL_PASSWORD` are the envdata connection (`jdbc:mysql://<host>:3306/envdata?sslMode=REQUIRED`
+or a native MySqlConnector string). `DB_URL` / `DB_USERNAME` / `DB_PASSWORD` stay in the file as the SQL Server
+connection; 11.0.0 does not open it.
+Set `WEATHER_TEST_MYSQL` to a throwaway envdata database's connection string to also run the engine tests.
  .
 
 Everything else is in `WeatherService/appsettings.json` under `Weather:*` and `Smtp:*`;

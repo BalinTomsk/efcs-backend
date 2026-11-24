@@ -1,4 +1,4 @@
-using Microsoft.Data.SqlClient;
+using MySqlConnector;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using WeatherService.Data;
 
@@ -23,7 +23,7 @@ public sealed class DbHealthCheck : IHealthCheck
     {
         try
         {
-            await using SqlConnection connection =
+            await using MySqlConnection connection =
                 await _connectionFactory.OpenAsync(cancellationToken).ConfigureAwait(false);
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT 1";

@@ -518,7 +518,8 @@ public class StationWorkerTests
     private sealed class FakePostProcessing(Harness harness)
         : StationPostProcessingService(null!, NullLogger<StationPostProcessingService>.Instance)
     {
-        public override Task RunAfterStationProcessingAsync(CancellationToken ct = default)
+        public override Task RunAfterStationProcessingAsync(
+            string provider, string country, DateTime startedUtc, int succeeded, int failed, CancellationToken ct = default)
         {
             harness.PostProcessingRuns++;
             return harness.PostProcessingError is null

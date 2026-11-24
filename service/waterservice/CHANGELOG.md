@@ -10,6 +10,38 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The ver
 
 ## [Unreleased]
 
+## [11.0.0] — 2026-11-25 (LIVE on csnode 2026-11-24 18:27 UTC)
+
+The water data leaves SQL Server: this service now writes the MySQL `envdata` database on debian-mysql (plan:
+efcs-backend/service/env_service/docs/env_service_plan.md, step 2). Deploy needs the envdata schema
+(`envfish-db/mysql/envdata`) and the `waterservice` MySQL account first; the Java water service keeps writing SQL
+Server during the shadow period, so nothing reading SQL Server loses data.
+
+### Changed
+- **Database: MySQL `envdata` instead of SQL Server.** `Microsoft.Data.SqlClient` → `MySqlConnector` 2.6.2;
+  the connection comes from the NEW keys `MYSQL_URL` (`jdbc:mysql://<host>:3306/envdata?sslMode=REQUIRED` or a native
+  MySqlConnector string) / `MYSQL_USERNAME` / `MYSQL_PASSWORD` (`MySqlUrl` replaces `JdbcConnectionString`).
+  `DB_URL` / `DB_USERNAME` / `DB_PASSWORD` stay in the env file as the SQL Server connection, so one file carries
+  both and a rollback to 10.8.0 needs no file change. Every call goes through an envdata view or procedure:
+  `v_station_water_due`, `sp_water_save_ca`, `sp_water_save_us`, `sp_station_503_*`, `sp_job_run_record`,
+  `sp_clean_old_water_data`.
+- **CA: one call per 500 readings** with the readings as one JSON array, instead of one `EXEC` per reading.
+- **US: all series of a station in ONE call**, as `UsSeriesReading(Name, Unit, Day, Value)` points instead of a
+  legacy XML document per series. envdata merges a day's series into one reading, so oxygen, turbidity, pH, etc.
+  now all reach the station's current state (`sp_push_us_water_data` ran per series and its trigger fired on INSERT
+  only, so only the first series of a new day got there). The database also stores pressure in mm Hg (was hPa),
+  pH as the real value (was truncated: 7.62 → 7, shown as 0.7) and oxygen in mg/L only ("% saturation"
+  overwrote it).
+- **HTTP 503 back-off state now lives in envdata**, so it is no longer shared with the Java service.
+- **The SQL retry/breaker ignores SQLSTATE 45000** (an envdata procedure's own refusal, e.g. an unknown station):
+  a bad request, not an outage, so it is neither retried nor counted toward opening the breaker.
+
+### Removed
+- **The fish hand-over** (`dbo.spPushSpeciesFromLakeToStation` after a successful cycle). A successful cycle is
+  recorded in envdata's `job_run` instead (`water-ca`, `water-us`, or `water` for a both-country cycle;
+  status `ok`/`partial`), and env_service pushes species and recomputes probabilities in SQL Server. Until
+  env_service is deployed, the Java water service still runs the species push.
+
 ## [10.8.0] — 2026-11-20 (LIVE on csnode 2026-11-20)
 
 ### Fixed

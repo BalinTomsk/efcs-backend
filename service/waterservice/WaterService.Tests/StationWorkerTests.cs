@@ -231,19 +231,32 @@ public class StationWorkerTests
         int processed = await harness.Worker.RunCycleAsync(null, CancellationToken.None);
 
         await Assert.That(processed).IsEqualTo(2);
-        await Assert.That(harness.PostProcessing.SpeciesRuns).IsEqualTo(1);
+        await Assert.That(harness.PostProcessing.RecordRuns).IsEqualTo(1);
         await Assert.That(harness.PostProcessing.CleanupRuns).IsEqualTo(1);
+        await Assert.That(harness.PostProcessing.Jobs).IsEquivalentTo(new[] { "water" });
     }
 
     [Test]
-    public async Task RunCycle_NoStationSucceeds_SkipsSpeciesPushButStillCleansOldData()
+    public async Task RunCountryCycle_RecordsTheCycleUnderTheCountrysJobName()
+    {
+        // env_service reads job_run to know which feed brought new readings; the job name says which one.
+        var harness = new Harness();
+        harness.Stations["CA"] = [new("02JE025", "QC", -5)];
+
+        await harness.Worker.RunCountryCycleAsync("CA", CancellationToken.None);
+
+        await Assert.That(harness.PostProcessing.Jobs).IsEquivalentTo(new[] { "water-ca" });
+    }
+
+    [Test]
+    public async Task RunCycle_NoStationSucceeds_SkipsJobRunRecordButStillCleansOldData()
     {
         var harness = new Harness();
         harness.Stations["CA"] = [new("A", "QC", -5)];
         harness.ProcessorCA.Outcomes["A"] = ProcessingOutcome.Failed;
 
         await Assert.That(await harness.Worker.RunCycleAsync(null, CancellationToken.None)).IsEqualTo(0);
-        await Assert.That(harness.PostProcessing.SpeciesRuns).IsEqualTo(0);
+        await Assert.That(harness.PostProcessing.RecordRuns).IsEqualTo(0);
         await Assert.That(harness.PostProcessing.CleanupRuns).IsEqualTo(1);
     }
 
@@ -262,25 +275,25 @@ public class StationWorkerTests
     }
 
     [Test]
-    public async Task RunCycle_StillCleansOldWaterData_WhenSpeciesPostProcessingFails()
+    public async Task RunCycle_StillCleansOldWaterData_WhenJobRunRecordFails()
     {
         var harness = new Harness();
         harness.Stations["CA"] = [new("A", "QC", -5)];
-        harness.PostProcessing.SpeciesFailure = new InvalidOperationException("species push failed");
+        harness.PostProcessing.RecordFailure = new InvalidOperationException("job_run record failed");
 
         var thrown = await CaptureAsync(() => harness.Worker.RunCycleAsync(null, CancellationToken.None));
 
-        await Assert.That(thrown.Message).IsEqualTo("species push failed");
+        await Assert.That(thrown.Message).IsEqualTo("job_run record failed");
         await Assert.That(harness.PostProcessing.CleanupRuns).IsEqualTo(1);
     }
 
     [Test]
-    public async Task RunCycle_BothPostProcessingStepsFail_PropagatesBothWithSpeciesFirst()
+    public async Task RunCycle_BothPostProcessingStepsFail_PropagatesBothWithJobRunFirst()
     {
-        // A cleanup failure must never mask the species failure that preceded it.
+        // A cleanup failure must never mask the job_run failure that preceded it.
         var harness = new Harness();
         harness.Stations["CA"] = [new("A", "QC", -5)];
-        harness.PostProcessing.SpeciesFailure = new InvalidOperationException("species push failed");
+        harness.PostProcessing.RecordFailure = new InvalidOperationException("job_run record failed");
         harness.PostProcessing.CleanupFailure = new InvalidOperationException("cleanup failed");
 
         var thrown = await CaptureAsync(() => harness.Worker.RunCycleAsync(null, CancellationToken.None));
@@ -288,7 +301,7 @@ public class StationWorkerTests
         var aggregate = thrown as AggregateException;
         await Assert.That(aggregate).IsNotNull();
         await Assert.That(aggregate!.InnerExceptions.Select(e => e.Message))
-            .IsEquivalentTo(new[] { "species push failed", "cleanup failed" });
+            .IsEquivalentTo(new[] { "job_run record failed", "cleanup failed" });
     }
 
     // --- per-country scheduled cycles ---------------------------------------------------------------
@@ -305,7 +318,7 @@ public class StationWorkerTests
         await Assert.That(processed).IsEqualTo(1);
         await Assert.That(harness.ProcessorCA.Seen).IsEmpty();
         await Assert.That(harness.ProcessorUS.Seen).IsEquivalentTo(new[] { "08313000" });
-        await Assert.That(harness.PostProcessing.SpeciesRuns).IsEqualTo(1);
+        await Assert.That(harness.PostProcessing.RecordRuns).IsEqualTo(1);
         await Assert.That(harness.PostProcessing.CleanupRuns).IsEqualTo(1);
     }
 
@@ -322,7 +335,7 @@ public class StationWorkerTests
 
         await Assert.That(processed).IsEqualTo(1);
         await Assert.That(harness.ProcessorUS.Seen).IsEquivalentTo(new[] { "08313000" });
-        await Assert.That(harness.PostProcessing.SpeciesRuns).IsEqualTo(1);
+        await Assert.That(harness.PostProcessing.RecordRuns).IsEqualTo(1);
         await Assert.That(harness.Log.MessagesAt(LogLevel.Warning).Any(m => m.Contains("could not start")))
             .IsTrue();
     }
@@ -443,7 +456,7 @@ public class StationWorkerTests
 
         await Assert.That(harness.ProcessorCA.Seen).IsEquivalentTo(new[] { "02JE025" });
         await Assert.That(harness.ProcessorUS.Seen).IsEquivalentTo(new[] { "08313000" });
-        await Assert.That(harness.PostProcessing.SpeciesRuns).IsEqualTo(1);
+        await Assert.That(harness.PostProcessing.RecordRuns).IsEqualTo(1);
     }
 
     [Test]
@@ -706,21 +719,40 @@ public class StationWorkerTests
     private sealed class FakePostProcessing()
         : StationPostProcessingService(null!, NullLogger<StationPostProcessingService>.Instance)
     {
-        private int _speciesRuns;
+        private int _recordRuns;
         private int _cleanupRuns;
 
-        public Exception? SpeciesFailure { get; set; }
+        public Exception? RecordFailure { get; set; }
 
         public Exception? CleanupFailure { get; set; }
 
-        public int SpeciesRuns => Volatile.Read(ref _speciesRuns);
+        public int RecordRuns => Volatile.Read(ref _recordRuns);
+
+        private readonly List<string> _jobs = [];
+
+        /// <summary>The job names RecordCycleAsync was called with, in call order.</summary>
+        public IReadOnlyList<string> Jobs
+        {
+            get
+            {
+                lock (_jobs)
+                {
+                    return _jobs.ToList();
+                }
+            }
+        }
 
         public int CleanupRuns => Volatile.Read(ref _cleanupRuns);
 
-        public override Task RunAfterStationProcessingAsync(CancellationToken ct = default)
+        public override Task RecordCycleAsync(
+            string job, DateTime startedUtc, int succeeded, int failed, CancellationToken ct = default)
         {
-            Interlocked.Increment(ref _speciesRuns);
-            return SpeciesFailure is null ? Task.CompletedTask : Task.FromException(SpeciesFailure);
+            lock (_jobs)
+            {
+                _jobs.Add(job);
+            }
+            Interlocked.Increment(ref _recordRuns);
+            return RecordFailure is null ? Task.CompletedTask : Task.FromException(RecordFailure);
         }
 
         public override Task CleanOldWaterDataAsync(CancellationToken ct = default)

@@ -1,5 +1,5 @@
 using System.Data;
-using Microsoft.Data.SqlClient;
+using MySqlConnector;
 using Polly;
 using Polly.Registry;
 using WeatherService.Configuration;
@@ -8,8 +8,8 @@ namespace WeatherService.Data;
 
 /// <summary>
 /// Reads and writes the cached "which NWS station serves this water gauge" mapping
-/// (<c>dbo.weather_gov_station</c>), via <c>dbo.fn_weather_gov_station</c> and
-/// <c>dbo.sp_save_weather_gov_station</c> — never the table directly.
+/// (envdata <c>weather_gov_station</c>), via the view <c>v_weather_gov_station</c> and
+/// <c>sp_weather_gov_station_save</c> — never the table directly.
 /// </summary>
 public class WeatherGovStationRepository
 {
@@ -34,11 +34,11 @@ public class WeatherGovStationRepository
     public virtual async Task<CachedStation?> FindAsync(string mli, CancellationToken ct = default) =>
         await _sql.ExecuteAsync(async token =>
         {
-            await using SqlConnection connection = await _connectionFactory.OpenAsync(token).ConfigureAwait(false);
+            await using MySqlConnection connection = await _connectionFactory.OpenAsync(token).ConfigureAwait(false);
             await using var command = connection.CreateCommand();
             command.CommandType = CommandType.Text;
-            command.CommandText = "SELECT station_id FROM dbo.fn_weather_gov_station(@mli)";
-            command.Parameters.Add("@mli", SqlDbType.VarChar, 64).Value = mli;
+            command.CommandText = "SELECT station_id FROM v_weather_gov_station WHERE mli = @mli";
+            command.Parameters.Add("@mli", MySqlDbType.VarChar, 64).Value = mli;
 
             await using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
             if (!await reader.ReadAsync(token).ConfigureAwait(false))
@@ -57,14 +57,14 @@ public class WeatherGovStationRepository
         string mli, double latitude, double longitude, string? stationId, CancellationToken ct = default) =>
         await _sql.ExecuteAsync(async token =>
         {
-            await using SqlConnection connection = await _connectionFactory.OpenAsync(token).ConfigureAwait(false);
+            await using MySqlConnection connection = await _connectionFactory.OpenAsync(token).ConfigureAwait(false);
             await using var command = connection.CreateCommand();
-            command.CommandType = CommandType.StoredProcedure;
-            command.CommandText = "dbo.sp_save_weather_gov_station";
-            command.Parameters.Add("@mli", SqlDbType.VarChar, 64).Value = mli;
-            command.Parameters.Add("@lat", SqlDbType.Float).Value = latitude;
-            command.Parameters.Add("@lon", SqlDbType.Float).Value = longitude;
-            command.Parameters.Add("@station_id", SqlDbType.VarChar, 16).Value = (object?)stationId ?? DBNull.Value;
+            command.CommandType = CommandType.Text;
+            command.CommandText = "CALL sp_weather_gov_station_save(@mli, @lat, @lon, @station_id)";
+            command.Parameters.Add("@mli", MySqlDbType.VarChar, 64).Value = mli;
+            command.Parameters.Add("@lat", MySqlDbType.Double).Value = latitude;
+            command.Parameters.Add("@lon", MySqlDbType.Double).Value = longitude;
+            command.Parameters.Add("@station_id", MySqlDbType.VarChar, 16).Value = (object?)stationId ?? DBNull.Value;
             await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 

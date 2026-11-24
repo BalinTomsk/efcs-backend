@@ -1,5 +1,5 @@
 using System.Data;
-using Microsoft.Data.SqlClient;
+using MySqlConnector;
 using Polly;
 using Polly.Registry;
 using WaterService.Configuration;
@@ -12,11 +12,11 @@ namespace WaterService.Data;
 /// </summary>
 public sealed class StationHttp503BackoffRepository : IStationHttp503BackoffRepository
 {
-    private const string RefreshDue = "EXEC dbo.sp_water_station_503_refresh_due @today";
+    private const string RefreshDue = "CALL sp_station_503_refresh_due(@today)";
     private const string RecordHttp503 =
-        "EXEC dbo.sp_water_station_503_record @provider, @country, @stationMli, @state, @today";
-    private const string Reset = "EXEC dbo.sp_water_station_503_reset @provider, @country, @stationMli";
-    private const string SummaryByState = "EXEC dbo.sp_water_station_503_summary_by_state";
+        "CALL sp_station_503_record(@provider, @country, @stationMli, @state, @today)";
+    private const string Reset = "CALL sp_station_503_reset(@provider, @country, @stationMli)";
+    private const string SummaryByState = "CALL sp_station_503_summary_by_state()";
 
     private readonly ISqlConnectionFactory _connectionFactory;
     private readonly ResiliencePipeline _sql;
@@ -32,7 +32,7 @@ public sealed class StationHttp503BackoffRepository : IStationHttp503BackoffRepo
     public Task RefreshDueAsync(DateOnly today, CancellationToken ct = default) =>
         ExecuteAsync(RefreshDue, ct, command =>
         {
-            command.Parameters.Add("@today", SqlDbType.Date).Value = today.ToDateTime(TimeOnly.MinValue);
+            command.Parameters.Add("@today", MySqlDbType.Date).Value = today.ToDateTime(TimeOnly.MinValue);
         });
 
     public Task RecordHttp503Async(
@@ -44,19 +44,19 @@ public sealed class StationHttp503BackoffRepository : IStationHttp503BackoffRepo
         CancellationToken ct = default) =>
         ExecuteAsync(RecordHttp503, ct, command =>
         {
-            command.Parameters.Add("@provider", SqlDbType.NVarChar, 128).Value = provider;
-            command.Parameters.Add("@country", SqlDbType.NVarChar, 8).Value = country;
-            command.Parameters.Add("@stationMli", SqlDbType.NVarChar, 128).Value = stationMli;
-            command.Parameters.Add("@state", SqlDbType.NVarChar, 128).Value = state;
-            command.Parameters.Add("@today", SqlDbType.Date).Value = today.ToDateTime(TimeOnly.MinValue);
+            command.Parameters.Add("@provider", MySqlDbType.VarChar, 64).Value = provider;
+            command.Parameters.Add("@country", MySqlDbType.VarChar, 2).Value = country;
+            command.Parameters.Add("@stationMli", MySqlDbType.VarChar, 64).Value = stationMli;
+            command.Parameters.Add("@state", MySqlDbType.VarChar, 2).Value = state.Length > 2 ? state[..2] : state;
+            command.Parameters.Add("@today", MySqlDbType.Date).Value = today.ToDateTime(TimeOnly.MinValue);
         });
 
     public Task ResetAsync(string provider, string country, string stationMli, CancellationToken ct = default) =>
         ExecuteAsync(Reset, ct, command =>
         {
-            command.Parameters.Add("@provider", SqlDbType.NVarChar, 128).Value = provider;
-            command.Parameters.Add("@country", SqlDbType.NVarChar, 8).Value = country;
-            command.Parameters.Add("@stationMli", SqlDbType.NVarChar, 128).Value = stationMli;
+            command.Parameters.Add("@provider", MySqlDbType.VarChar, 64).Value = provider;
+            command.Parameters.Add("@country", MySqlDbType.VarChar, 2).Value = country;
+            command.Parameters.Add("@stationMli", MySqlDbType.VarChar, 64).Value = stationMli;
         });
 
     public async Task<IReadOnlyList<BackoffSummary>> SummaryByStateAsync(CancellationToken ct = default)
@@ -64,12 +64,12 @@ public sealed class StationHttp503BackoffRepository : IStationHttp503BackoffRepo
         return await _sql.ExecuteAsync(async token =>
         {
             var summaries = new List<BackoffSummary>();
-            await using SqlConnection connection = await _connectionFactory.OpenAsync(token).ConfigureAwait(false);
+            await using MySqlConnection connection = await _connectionFactory.OpenAsync(token).ConfigureAwait(false);
             await using var command = connection.CreateCommand();
             command.CommandType = CommandType.Text;
             command.CommandText = SummaryByState;
 
-            await using SqlDataReader reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
+            await using MySqlDataReader reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
             int stateOrdinal = reader.GetOrdinal("state");
             int stageOrdinal = reader.GetOrdinal("backoff_stage");
             int countOrdinal = reader.GetOrdinal("station_count");
@@ -89,11 +89,11 @@ public sealed class StationHttp503BackoffRepository : IStationHttp503BackoffRepo
     private async Task ExecuteAsync(
         string procedure,
         CancellationToken ct,
-        Action<SqlCommand> configure)
+        Action<MySqlCommand> configure)
     {
         await _sql.ExecuteAsync(async token =>
         {
-            await using SqlConnection connection = await _connectionFactory.OpenAsync(token).ConfigureAwait(false);
+            await using MySqlConnection connection = await _connectionFactory.OpenAsync(token).ConfigureAwait(false);
             await using var command = connection.CreateCommand();
             command.CommandType = CommandType.Text;
             command.CommandText = procedure;
