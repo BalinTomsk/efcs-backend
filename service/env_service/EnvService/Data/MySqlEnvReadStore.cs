@@ -96,6 +96,27 @@ public sealed class MySqlEnvReadStore(string connectionString, ResiliencePipelin
         }, ct).AsTask();
     }
 
+    public Task<IReadOnlyList<WaterDayRow>> WaterDaysAsync(int sid, DateOnly from, DateOnly to, CancellationToken ct) =>
+        _sql.ExecuteAsync(async token =>
+        {
+            var rows = new List<WaterDayRow>();
+            await using MySqlConnection connection = await OpenAsync(token);
+            await using var command = new MySqlCommand(
+                "SELECT sid, dt, readings, discharge, level, turbidity, oxygen, ph FROM v_water_day " +
+                "WHERE sid = @sid AND dt BETWEEN @from AND @to ORDER BY dt", connection);
+            command.Parameters.Add("@sid", MySqlDbType.Int32).Value = sid;
+            command.Parameters.Add("@from", MySqlDbType.Date).Value = from.ToDateTime(TimeOnly.MinValue);
+            command.Parameters.Add("@to", MySqlDbType.Date).Value = to.ToDateTime(TimeOnly.MinValue);
+            await using MySqlDataReader r = await command.ExecuteReaderAsync(token);
+            while (await r.ReadAsync(token))
+            {
+                rows.Add(new WaterDayRow(
+                    Convert.ToInt32(r.GetValue(0)), DateOnly.FromDateTime(r.GetDateTime(1)), Convert.ToInt32(r.GetValue(2)),
+                    D(r, 3), D(r, 4), D(r, 5), D(r, 6), M(r, 7)));
+            }
+            return (IReadOnlyList<WaterDayRow>)rows;
+        }, ct).AsTask();
+
     /// <summary><c>@s0,@s1,…</c>, one placeholder per station (bound by <see cref="AddSids"/>).</summary>
     internal static string Placeholders(int count) =>
         string.Join(",", Enumerable.Range(0, count).Select(i => "@s" + i));

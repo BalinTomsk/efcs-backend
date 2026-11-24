@@ -6,6 +6,10 @@ public sealed record StationInfo(
     string LocName, string? LakeId, string LakeName, int? Elevation, string? Agency, bool HasFish, bool Supported,
     DateTime? UpdData, DateTime? WeatherStamp);
 
+/// <summary>One row of envdata <c>v_water_day</c>: a station's daily means (discharge m³/s, level m, oxygen mg/L).</summary>
+public sealed record WaterDayRow(
+    int Sid, DateOnly Dt, int Readings, double? Discharge, double? Level, double? Turbidity, double? Oxygen, decimal? Ph);
+
 /// <summary>
 /// One row of envdata <c>v_weather_day</c>: a station's stored weather of one day plus that day's pressure state (when
 /// <c>sp_fill_pressure_state</c> computed one). Pressure in mm Hg, temperatures in °C, wind in km/h, rain in mm.

@@ -6,6 +6,15 @@ All notable changes go in this file, newest first, with the reason. Format:
 ## [Unreleased]
 
 ### Added
+- **EnvService 0.4.0** (2026-11-25, LIVE on csnode 2026-11-24 23:32 UTC): plan step 6b, the three forecast documents, the bodies docapi's
+  `/api/v1/forecast/*` will return from step 6c on: `GET /api/v1/env/forecast/stations?fish=&lat=&lon=&radius=&country=&limit=`,
+  `GET /api/v1/env/forecast/plot/{sid}?fish=`, `GET /api/v1/env/forecast/reasoning/{sid}?fish=&day=`. Same parameters,
+  clamps and 400 / 404 rules as docapi's ForecastController. The fish half comes from SQL Server (`env.fn_forecast_stations_json`,
+  `env.fn_fish_reasoning_json`, `env.fn_forecast_plot_meta_json`, through `sql-read`), the water and weather half from
+  envdata: the reasoning's weather blocks (day 0 and each week day) from `v_weather_day`; the plot's 23-day series
+  (today - 15 .. + 7) from `v_water_day` (daily means) and `v_weather_day`, and its 23-row calendar. Pressure in mm Hg
+  (`pressure.mm`, `swingMm`, `units.pressure = "mmHg"`). Answers are kept 5 minutes (at most 2,000), and sent with
+  `Cache-Control: private, max-age=300` as docapi does. Tests 36/36 (9 new); end to end on local SQL Server + MySQL.
 - **EnvService 0.3.0** (2026-11-25, LIVE on csnode 2026-11-24 21:07 UTC): plan step 6a, the first public read API on port 8080, so docapi
   (and later mcp-env and the portal) can read water and weather without SQL. Station and water-body reads, all from
   MySQL `envdata` (new views `v_station_info`, `v_weather_day`):

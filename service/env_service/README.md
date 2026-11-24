@@ -4,11 +4,10 @@ The water/weather service of FishFind (C# / .NET 10). It will serve every water,
 the MySQL `envdata` database and hand the fish-model input over to SQL Server. Plan and status:
 `docs/env_service_plan.md` (git-ignored; workstation only). Schema: `envfish-db/mysql/envdata`.
 
-**Built so far:** `EnvService` 0.3.0 (plan steps 4-6a: station mirror, hand-over, fish model behind a switch, the
-station and water-body reads of `/api/v1/env/*`) and `EnvService.Migrator` (step 3, one-off). The forecast endpoints
-come with step 6b.
+**Built so far:** `EnvService` 0.4.0 (plan steps 4-6b: station mirror, hand-over, fish model behind a switch, the
+station, water-body and forecast reads of `/api/v1/env/*`) and `EnvService.Migrator` (step 3, one-off).
 
-## EnvService 0.3.0 — the read API (port 8080)
+## EnvService 0.4.0 — the read API (port 8080)
 
 Metric, pressure in mm Hg, times UTC, envelope `{data, error, meta}`. Contracts: `docs/api-reference.html`.
 
@@ -19,9 +18,14 @@ Metric, pressure in mm Hg, times UTC, envelope `{data, error, meta}`. Contracts:
 | `GET /api/v1/env/stations/{sid}/weather?from=&to=` | daily weather with the day's pressure state (≤ 31 days; default 15 back .. 15 ahead) |
 | `GET /api/v1/env/lakes/{lakeId}/stations` | the stations of a water body |
 | `GET /api/v1/env/lakes/{lakeId}/weather?date=` | each of its stations with current values and that day's weather |
+| `GET /api/v1/env/forecast/stations?fish=&lat=&lon=&radius=&country=&limit=` | the forecast-map stations near a point for one fish |
+| `GET /api/v1/env/forecast/plot/{sid}?fish=` | the forecast chart: 23-day series, calendar, 7-day score |
+| `GET /api/v1/env/forecast/reasoning/{sid}?fish=&day=` | why the score is what it is (factors, flow, pressure, weather, week) |
 
 Stations are served from a cache of envdata `v_station_info` (job `stations`, every 15 min); current values and weather
-are primary-key reads of `v_station_state` / `v_weather_day`.
+are primary-key reads of `v_station_state` / `v_weather_day` / `v_water_day`. The forecast's fish half comes from SQL
+Server (`env.fn_forecast_stations_json`, `env.fn_fish_reasoning_json`, `env.fn_forecast_plot_meta_json`); answers are
+kept 5 minutes.
 
 ## EnvService — the background jobs
 
