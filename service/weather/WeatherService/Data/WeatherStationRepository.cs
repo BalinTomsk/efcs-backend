@@ -1,10 +1,12 @@
 using System.Data;
+using MySqlConnector;
 using WeatherService.Domain;
 
 namespace WeatherService.Data;
 
 /// <summary>
-/// Loads the weather stations that should be processed, from <c>dbo.vwWeatherForecastToDay</c>.
+/// Loads the weather stations that should be processed, from envdata (<c>sp_station_weather_due</c>, a random sample
+/// of <c>v_station_weather_due</c>; port of MSSQL <c>vwWeatherForecastToDay</c>).
 ///
 /// <para><strong>This class holds no station cap of its own.</strong> The caller
 /// (<c>StationWorker</c>) passes the limit, which is the provider's remaining daily budget
@@ -16,14 +18,12 @@ namespace WeatherService.Data;
 public class WeatherStationRepository
 {
     private const string FindSupportedStationsSql = """
-        SELECT TOP (@limit) mli, lat, lon, state
-        FROM dbo.vwWeatherForecastToDay
-        WHERE country = @country
+        CALL sp_station_weather_due(@country, @limit)
         """;
 
     private const string CountSupportedStationsSql = """
         SELECT COUNT(1)
-        FROM dbo.vwWeatherForecastToDay
+        FROM v_station_weather_due
         WHERE country = @country
         """;
 
@@ -52,8 +52,8 @@ public class WeatherStationRepository
         await using var command = connection.CreateCommand();
         command.CommandType = CommandType.Text;
         command.CommandText = FindSupportedStationsSql;
-        command.Parameters.Add("@limit", SqlDbType.Int).Value = limit;
-        command.Parameters.Add("@country", SqlDbType.NVarChar, 8).Value = country;
+        command.Parameters.Add("@limit", MySqlDbType.Int32).Value = limit;
+        command.Parameters.Add("@country", MySqlDbType.VarChar, 2).Value = country;
 
         await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
         int mliOrdinal = reader.GetOrdinal("mli");
@@ -83,7 +83,7 @@ public class WeatherStationRepository
         await using var command = connection.CreateCommand();
         command.CommandType = CommandType.Text;
         command.CommandText = CountSupportedStationsSql;
-        command.Parameters.Add("@country", SqlDbType.NVarChar, 8).Value = country;
+        command.Parameters.Add("@country", MySqlDbType.VarChar, 2).Value = country;
 
         object? count = await command.ExecuteScalarAsync(ct).ConfigureAwait(false);
         return count is null or DBNull ? 0 : Convert.ToInt32(count);

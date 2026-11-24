@@ -23,9 +23,8 @@ RUN dotnet publish WaterService/WaterService.csproj \
 FROM debian:trixie-slim AS runtime
 WORKDIR /app
 
-# Native deps for a self-contained .NET app + curl for the HEALTHCHECK. Microsoft.Data.SqlClient
-# requires ICU (libicu76 on Debian 13) — it does not support globalization-invariant mode; openssl
-# provides libssl for SqlClient TLS.
+# Native deps for a self-contained .NET app + curl for the HEALTHCHECK. ICU (libicu76 on Debian 13) because the
+# platform never runs in globalization-invariant mode; openssl provides libssl for the TLS connection to MySQL.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl openssl libicu76 \
  && rm -rf /var/lib/apt/lists/*

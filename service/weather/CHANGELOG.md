@@ -4,6 +4,33 @@ All notable changes for this service must be recorded in this file.
 
 ## [Unreleased]
 
+## [11.0.0] — 2026-11-25 (LIVE on csnode 2026-11-24 18:27 UTC)
+
+The weather data leaves SQL Server: this service now writes the MySQL `envdata` database on debian-mysql (plan:
+efcs-backend/service/env_service/docs/env_service_plan.md, step 2). Deploy needs the envdata schema
+(`envfish-db/mysql/envdata`) and the `weather` MySQL account first; the Java weather service keeps writing SQL Server
+(and running the fish procedures there) during the shadow period, so nothing reading SQL Server loses data.
+
+### Changed
+- **Database: MySQL `envdata` instead of SQL Server.** `Microsoft.Data.SqlClient` → `MySqlConnector` 2.6.2; the
+  connection comes from the NEW keys `MYSQL_URL` (`jdbc:mysql://<host>:3306/envdata?sslMode=REQUIRED` or a native
+  MySqlConnector string) / `MYSQL_USERNAME` / `MYSQL_PASSWORD` (`MySqlUrl` replaces `JdbcConnectionString`). `DB_URL` /
+  `DB_USERNAME` / `DB_PASSWORD` stay in the env file as the SQL Server connection, so a rollback needs no file change. Every call goes through an envdata view or procedure.
+- **Payloads are saved with `sp_weather_save`**, which stores the raw document and shreds the canonical envelope in
+  one call, instead of a raw `UPDATE dbo.ows_meteo` (the grandfathered table write is gone) + trigger. The database
+  stores pressure in **mm Hg** (`pressure_mm`); the envelope still carries `pressureHpa`. An unknown station is
+  still logged and dropped; a payload stored but not shredded is now logged too.
+- Stations: `sp_station_weather_due` (random sample) and `v_station_weather_due` (count) replace
+  `vwWeatherForecastToDay`; the NWS cache and provider coverage use `v_weather_gov_station`,
+  `sp_weather_gov_station_save` and `sp_provider_coverage_save`.
+- **The SQL retry/breaker ignores SQLSTATE 45000** (an envdata procedure's own refusal): not an outage.
+
+### Removed
+- **The fish hand-over** after a healthy cycle (`dbo.spPushSpeciesFromLakeToStation`, `dbo.spTotalUpdateProbability`).
+  The cycle is recorded in envdata's `job_run` instead (`{provider}-{country}`, e.g. `open-ca`; only when a station
+  was saved), and env_service runs both in SQL Server. Until env_service is deployed the Java weather service still
+  runs them.
+
 ## [10.5.0] — 2026-11-21 (LIVE on csnode 2026-11-21)
 
 ### Added

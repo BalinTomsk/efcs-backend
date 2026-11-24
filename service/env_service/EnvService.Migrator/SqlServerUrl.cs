@@ -1,6 +1,6 @@
 using Microsoft.Data.SqlClient;
 
-namespace WaterService.Configuration;
+namespace EnvService.Migrator;
 
 /// <summary>
 /// Converts the shared JDBC-style <c>DB_URL</c> used across the FishFind backend services into a
@@ -13,7 +13,7 @@ namespace WaterService.Configuration;
 /// <para>If <c>DB_URL</c> is already a native SqlClient connection string (contains <c>Server=</c> or
 /// <c>Data Source=</c>), it is used as-is with credentials merged in.</para>
 /// </summary>
-public static class JdbcConnectionString
+public static class SqlServerUrl
 {
     /// <summary>
     /// Builds a SqlClient connection string from a JDBC URL (or native connection string) plus credentials.

@@ -4,7 +4,8 @@ using WaterService.Domain;
 namespace WaterService.Data;
 
 /// <summary>
-/// Loads station metadata from the <c>vwWaterStation</c> view.
+/// Loads the stations to collect from the envdata view <c>v_station_water_due</c> (supported stations, newest reading
+/// first; port of MSSQL <c>vwWaterStation</c>).
 /// </summary>
 public class WaterStationRepository
 {
@@ -28,7 +29,7 @@ public class WaterStationRepository
         await using var command = connection.CreateCommand();
         command.CommandType = CommandType.Text;
         command.CommandText =
-            "SELECT mli, state, tz FROM vwWaterStation WHERE country = @country ORDER BY stamp DESC";
+            "SELECT mli, state, tz FROM v_station_water_due WHERE country = @country ORDER BY stamp DESC";
 
         var parameter = command.CreateParameter();
         parameter.ParameterName = "@country";

@@ -211,6 +211,7 @@ public class StationWorker : BackgroundService
     {
         string country = worker.Country;
         bool wholeCountry = string.IsNullOrWhiteSpace(requestedMli);
+        DateTime startedUtc = DateTime.UtcNow;
 
         int totalSupportedStations = await _stationRepository.CountSupportedStationsAsync(country, ct)
             .ConfigureAwait(false);
@@ -332,7 +333,7 @@ public class StationWorker : BackgroundService
             return summary;
         }
 
-        await MaybeRunPostProcessingAsync(summary, ct).ConfigureAwait(false);
+        await MaybeRunPostProcessingAsync(summary, startedUtc, ct).ConfigureAwait(false);
         return summary;
     }
 
@@ -521,11 +522,11 @@ public class StationWorker : BackgroundService
 
     /// <summary>
     /// Runs post-processing only when the cycle was healthy. A high failure rate (an open circuit, mass
-    /// SQL failures) is a cycle-level problem: skip post-processing so probabilities are not recomputed
-    /// from partial data, and log an error for alerting. Skipped stations (no published feed) are normal
+    /// SQL failures) is a cycle-level problem: skip post-processing, so the cycle is not recorded in job_run and
+    /// env_service does not recompute probabilities from partial data, and log an error for alerting. Skipped stations (no published feed) are normal
     /// and never block post-processing.
     /// </summary>
-    private async Task MaybeRunPostProcessingAsync(CountryPassSummary summary, CancellationToken ct)
+    private async Task MaybeRunPostProcessingAsync(CountryPassSummary summary, DateTime startedUtc, CancellationToken ct)
     {
         int processed = summary.SuccessfulStations;
         int skipped = summary.SkippedStations;
@@ -550,7 +551,9 @@ public class StationWorker : BackgroundService
 
         try
         {
-            await _postProcessingService.RunAfterStationProcessingAsync(ct).ConfigureAwait(false);
+            await _postProcessingService.RunAfterStationProcessingAsync(
+                    summary.Provider, summary.Country, startedUtc, processed, failed, ct)
+                .ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

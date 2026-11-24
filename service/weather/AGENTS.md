@@ -41,7 +41,7 @@ four together:
 | Language | C# / .NET 10 (`net10.0`) |
 | Projects | `WeatherService`, `WeatherService.Tests` (`WeatherService.slnx`) |
 | Entry point | `WeatherService/Program.cs` (top-level statements) |
-| SQL | `Microsoft.Data.SqlClient`, raw parameterised commands — no ORM |
+| SQL | `MySqlConnector` to MySQL `envdata` (since 11.0.0; no SQL Server), parameterised `CALL`s and view reads — no ORM |
 | Resilience | Polly (retry + circuit breaker) + `System.Threading.RateLimiting` |
 | Logging | Serilog, `RenderedCompactJsonFormatter`, console + 7-day rolling file |
 | Mail | MailKit |
@@ -121,9 +121,8 @@ Each of these is a considered choice, not drift. Anything not listed here should
 
 ## Gotchas
 
-- **Do NOT set `InvariantGlobalization`.** `Microsoft.Data.SqlClient` throws
-  "Globalization Invariant Mode is not supported" at connection open. The runtime image installs
-  `libicu76` instead. (Same trap as `waterservice`.)
+- **Do NOT set `InvariantGlobalization`** (platform rule; Microsoft.Data.SqlClient, used up to 10.5.0, threw at
+  connection open without it). The runtime image installs `libicu76`. (Same as `waterservice`.)
 
 - **Crash detection depends on a graceful stop.** `ServiceLifecycleTracker` writes `RUNNING` at startup
   and `CLEAN` on shutdown; a next startup that still sees `RUNNING` reports a crash. `docker rm -f` and
@@ -150,17 +149,17 @@ Each of these is a considered choice, not drift. Anything not listed here should
   only to stop a nonsensical *derived* value (a huge daily limit) becoming a burst. An explicit number is
   an operator decision, so it wins.
 
-- **`mli` is a WATER gauge id, not a weather-station id.** `vwWeatherForecastToDay` comes from
-  `dbo.WaterStation`; US rows are USGS site numbers. Any provider addressed *by station id* must first
-  resolve the coordinate — `WeatherGovStationResolver` does this and caches the answer in
-  `dbo.weather_gov_station`. Coordinate-addressed providers (Open-Meteo, Visual Crossing, Google) need
+- **`mli` is a WATER gauge id, not a weather-station id.** `v_station_weather_due` comes from envdata `station`,
+  the mirror of SQL Server's `WaterStation`; US rows are USGS site numbers. Any provider addressed *by station id*
+  must first resolve the coordinate — `WeatherGovStationResolver` does this and caches the answer in envdata
+  `weather_gov_station`. Coordinate-addressed providers (Open-Meteo, Visual Crossing, Google) need
   nothing. Weather.gov silently 404'd all 2,219 US stations until 10.0.1 because of this.
 
-- **Provider coverage is flagged in `dbo.weather_station_coverage`.** Not every provider answers every
+- **Provider coverage is flagged in envdata `provider_coverage`.** Not every provider answers every
   coordinate — SWOB is an observation network with real gaps, gridded providers have none. `StationWorker`
   records PROCESSED/SKIPPED per (gauge, provider); a FAILURE is deliberately not recorded, because it is
   transient and would otherwise exile a well-served gauge to the fallback worker. Query the gaps with
-  `dbo.fn_weather_uncovered_stations(@provider)`, which returns the coordinate a fallback worker needs.
+  `v_provider_coverage` (`WHERE provider = ? AND covered = 0`).
 
 - **A 100%-skipped cycle looks healthy.** `Skipped` is deliberately not a failure, so a provider that
   matches *nothing* passes every health check, runs post-processing, and logs no errors. Startup
@@ -174,15 +173,17 @@ Each of these is a considered choice, not drift. Anything not listed here should
   that is also the only form that is correct after a hard kill, where nothing can credit anything back.
   An unwritable state directory still skips the provider entirely rather than running unmetered.
 
-- **`UPDATE dbo.ows_meteo` is a grandfathered raw-table write**, inherited from the legacy .NET service
-  and the Java port. It is the documented exception to the house rule that application code goes through
-  a view/function/procedure. Do not add new raw-table statements alongside it — if a save procedure is
-  ever introduced, switch this one to call it.
+- **No raw table access.** Since 11.0.0 the grandfathered `UPDATE dbo.ows_meteo` is gone: payloads go through
+  `sp_weather_save`. Every statement is a `CALL` of an envdata procedure or a read of an envdata view.
 
-- **Payloads are stored verbatim.** Nothing parses the provider JSON. The response size cap and the
-  cheap `{`-first shape guard exist precisely because the body goes straight into a column: an unbounded
-  read is an unbounded INSERT, and an HTML error page returned with a 200 would choke the downstream
-  procedures.
+- **The payload is stored as sent** (`weather_raw`, newest per station) and only the canonical envelope is
+  parsed, by `sp_weather_save`. The response size cap and the cheap `{`-first shape guard exist because the body
+  goes straight into a column: an unbounded read is an unbounded INSERT, and an HTML error page returned with a
+  200 would be stored as the station's weather.
+
+- **Engine tests:** `WeatherEngineTests` runs the real repositories against a real MySQL when `WEATHER_TEST_MYSQL`
+  holds a connection string of a THROWAWAY database built from `envfish-db/mysql/envdata`; otherwise they are no-ops.
+  Any change to SQL text must be run that way (a fake never parses SQL).
 
 - **`StationProcessorOpen.Country` is `"US"` even though the Open-Meteo worker serves CA.** Inherited
   from Java; the worker passes the real country per call, and the processor's own value is only a
@@ -193,8 +194,10 @@ Each of these is a considered choice, not drift. Anything not listed here should
 Follows the schema in the separate `envfish-db` repo. **Before making ANY database change, read
 `c:\envoinx\fishfind\envfish-db\AGENTS.md` first** — it is the authoritative DB workflow (never edit the
 generated `ffi2.sql`; edit the `scriptNN_*.sql` sources; test-first: a FAILING unit test to confirm the
-bug, then a PASSING one to verify the fix; run `mssql\UNIT_TESTS\autorun.bat`). That file does not
-auto-load here, so it must be opened explicitly.
+bug, then a PASSING one to verify the fix). That file does not auto-load here, so it must be opened explicitly.
+This service's database is the MySQL **`envdata`** schema in `envfish-db/mysql/envdata` (tests in its
+`UNIT_TESTS`; AGENTS.md section "MySQL envdata").
 
-Objects used: `dbo.vwWeatherForecastToDay` (read), `dbo.ows_meteo` (update),
-`dbo.spPushSpeciesFromLakeToStation`, `dbo.spTotalUpdateProbability`, `dbo.sp_clean_old_weather_data`.
+Objects used (all envdata): `sp_station_weather_due`, `v_station_weather_due` (read), `sp_weather_save`,
+`v_weather_gov_station`, `sp_weather_gov_station_save`, `sp_provider_coverage_save`, `sp_job_run_record`,
+`sp_clean_old_weather_data`. The account (`weather`) has EXECUTE on `envdata` only.

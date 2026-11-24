@@ -1,5 +1,5 @@
 using System.Data;
-using Microsoft.Data.SqlClient;
+using MySqlConnector;
 using Polly;
 using Polly.Registry;
 using WeatherService.Configuration;
@@ -8,8 +8,7 @@ namespace WeatherService.Data;
 
 /// <summary>
 /// Records whether a provider can serve a given gauge, so a fallback worker can pick up the ones it
-/// cannot (<c>dbo.weather_station_coverage</c>, via <c>dbo.sp_save_weather_station_coverage</c> —
-/// never the table directly).
+/// cannot (envdata <c>provider_coverage</c>, via <c>sp_provider_coverage_save</c> — never the table directly).
 ///
 /// <para>Not every provider answers every coordinate. Weather Canada's SWOB is an observation network
 /// with real geographic gaps — even a 0.5° (~55 km) search box finds nothing for roughly one Canadian
@@ -37,13 +36,13 @@ public class WeatherStationCoverageRepository
         string mli, string provider, bool covered, CancellationToken ct = default) =>
         await _sql.ExecuteAsync(async token =>
         {
-            await using SqlConnection connection = await _connectionFactory.OpenAsync(token).ConfigureAwait(false);
+            await using MySqlConnection connection = await _connectionFactory.OpenAsync(token).ConfigureAwait(false);
             await using var command = connection.CreateCommand();
-            command.CommandType = CommandType.StoredProcedure;
-            command.CommandText = "dbo.sp_save_weather_station_coverage";
-            command.Parameters.Add("@mli", SqlDbType.VarChar, 64).Value = mli;
-            command.Parameters.Add("@provider", SqlDbType.VarChar, 32).Value = provider;
-            command.Parameters.Add("@covered", SqlDbType.Bit).Value = covered;
+            command.CommandType = CommandType.Text;
+            command.CommandText = "CALL sp_provider_coverage_save(@mli, @provider, @covered)";
+            command.Parameters.Add("@mli", MySqlDbType.VarChar, 64).Value = mli;
+            command.Parameters.Add("@provider", MySqlDbType.VarChar, 32).Value = provider;
+            command.Parameters.Add("@covered", MySqlDbType.Byte).Value = covered ? (sbyte)1 : (sbyte)0;
             await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 }

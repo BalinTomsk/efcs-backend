@@ -15,7 +15,7 @@ namespace WaterService.Processing;
 ///
 /// <para>In normal mode the CA and US passes each run on their <strong>own</strong> schedule of the same cron
 /// expression, so a slow CA pass (one request per station) cannot hold back the US refresh. Each scheduled
-/// pass is followed by post-processing — species push only when at least one station succeeded, cleanup
+/// pass is followed by post-processing — a job_run record only when at least one station succeeded, cleanup
 /// always — serialised between the two countries. A pass that overruns its period delays only its own next
 /// run instead of overlapping. Startup runs (<see cref="RunCycleAsync"/>) still process both countries
 /// together and post-process exactly once.</para>
@@ -252,6 +252,7 @@ public sealed class StationWorker : BackgroundService
     public async Task<int> RunCycleAsync(string? requestedMli, CancellationToken ct)
     {
         string correlationId = Guid.NewGuid().ToString("N").Substring(0, 8);
+        DateTime startedUtc = DateTime.UtcNow;
 
         Task<PassStats> caPass = RunPassAsync("CA", requestedMli, correlationId, ct);
         Task<PassStats> usPass = RunPassAsync("US", requestedMli, correlationId, ct);
@@ -263,7 +264,7 @@ public sealed class StationWorker : BackgroundService
 
         using (LogContext.PushProperty(CorrelationIdProperty, correlationId))
         {
-            Exception? postProcessingFailure = await PostProcessAsync(succeeded, ct).ConfigureAwait(false);
+            Exception? postProcessingFailure = await PostProcessAsync("water", startedUtc, succeeded, failed, ct).ConfigureAwait(false);
 
             _log.LogInformation(
                 "Station cycle completed. successfulStations={Succeeded} failedStations={Failed} "
@@ -283,7 +284,7 @@ public sealed class StationWorker : BackgroundService
     }
 
     /// <summary>
-    /// Runs one country's scheduled cycle: its pass, then post-processing (species push only when at least
+    /// Runs one country's scheduled cycle: its pass, then post-processing (job_run record only when at least
     /// one station succeeded; cleanup always). A pass that throws before processing (the station list or the
     /// backoff refresh failed) is retried up to <see cref="WorkerOptions.PassStartRetries"/> times,
     /// <see cref="WorkerOptions.PassStartRetryDelayMs"/> apart: on 2026-11-20 the CA and US cycles fired
@@ -295,6 +296,7 @@ public sealed class StationWorker : BackgroundService
     public async Task<int> RunCountryCycleAsync(string country, CancellationToken ct)
     {
         string correlationId = Guid.NewGuid().ToString("N").Substring(0, 8);
+        DateTime startedUtc = DateTime.UtcNow;
         PassStats? attempt = await TryPassAsync(RunPassAsync(country, null, correlationId, ct), country)
             .ConfigureAwait(false);
         for (int retry = 1; attempt is null && retry <= _options.PassStartRetries; retry++)
@@ -318,7 +320,8 @@ public sealed class StationWorker : BackgroundService
 
         using (LogContext.PushProperty(CorrelationIdProperty, correlationId))
         {
-            Exception? postProcessingFailure = await PostProcessAsync(stats.Succeeded, ct).ConfigureAwait(false);
+            Exception? postProcessingFailure = await PostProcessAsync(
+                "water-" + country.ToLowerInvariant(), startedUtc, stats.Succeeded, stats.Failed, ct).ConfigureAwait(false);
 
             _log.LogInformation(
                 "Station cycle completed. country={Country} successfulStations={Succeeded} failedStations={Failed} "
@@ -336,14 +339,16 @@ public sealed class StationWorker : BackgroundService
     }
 
     /// <summary>
-    /// Runs species post-processing (only when <paramref name="succeeded"/> &gt; 0) and then old-data cleanup,
-    /// one caller at a time. A species-push failure never blocks cleanup.
+    /// Records the cycle in job_run (only when <paramref name="succeeded"/> &gt; 0, so env_service hands over only
+    /// cycles that brought readings) and then runs old-data cleanup, one caller at a time. A record failure never
+    /// blocks cleanup.
     /// </summary>
     /// <returns>
     /// The failure for the caller to rethrow after its summary log (both combined if both steps failed), or
     /// <c>null</c>.
     /// </returns>
-    private async Task<Exception?> PostProcessAsync(int succeeded, CancellationToken ct)
+    private async Task<Exception?> PostProcessAsync(
+        string job, DateTime startedUtc, int succeeded, int failed, CancellationToken ct)
     {
         await _postProcessingGate.WaitAsync(ct).ConfigureAwait(false);
         try
@@ -353,7 +358,7 @@ public sealed class StationWorker : BackgroundService
             {
                 if (succeeded > 0)
                 {
-                    await _postProcessing.RunAfterStationProcessingAsync(ct).ConfigureAwait(false);
+                    await _postProcessing.RecordCycleAsync(job, startedUtc, succeeded, failed, ct).ConfigureAwait(false);
                 }
                 else
                 {
@@ -363,7 +368,7 @@ public sealed class StationWorker : BackgroundService
             catch (Exception ex)
             {
                 postProcessingFailure = ex;
-                _log.LogError(ex, "Species post-processing failed; still running old-data cleanup.");
+                _log.LogError(ex, "Recording the cycle in job_run failed; still running old-data cleanup.");
             }
 
             try
@@ -372,7 +377,7 @@ public sealed class StationWorker : BackgroundService
             }
             catch (Exception ex)
             {
-                // Never let a cleanup failure mask the species-push failure that preceded it.
+                // Never let a cleanup failure mask the job_run failure that preceded it.
                 if (postProcessingFailure is null)
                 {
                     postProcessingFailure = ex;

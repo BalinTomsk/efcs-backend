@@ -10,6 +10,7 @@ service/OWMService/Res/OWMService.reg
 service/OWMService/Res/OWMSservice
 service/waterservice/docs/*
 service/waterapi/docs/*
+service/env_service/docs/*
 service/waterapi/CLAUDE.md
 .vs
 

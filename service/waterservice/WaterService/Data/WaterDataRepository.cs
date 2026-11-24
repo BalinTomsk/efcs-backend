@@ -1,6 +1,7 @@
 using System.Data;
-using System.Text;
-using Microsoft.Data.SqlClient;
+using System.Globalization;
+using System.Text.Json;
+using MySqlConnector;
 using Polly;
 using Polly.Registry;
 using WaterService.Configuration;
@@ -9,18 +10,21 @@ using WaterService.Domain;
 namespace WaterService.Data;
 
 /// <summary>
-/// Persists parsed station readings into the legacy <c>dbo.WaterData</c> table and runs the
-/// post-processing stored procedures. All SQL work is wrapped in the <c>sql</c> resilience pipeline
+/// Persists parsed station readings into the MySQL <c>envdata</c> database through its procedures
+/// (<c>envfish-db/mysql/envdata/script02_Proc.sql</c>; no table is touched directly), records each finished cycle in
+/// <c>job_run</c> and runs the nightly retention. All SQL work is wrapped in the <c>sql</c> resilience pipeline
 /// (retry + circuit breaker).
 /// </summary>
 public sealed class WaterDataRepository
 {
     /// <summary>
-    /// Readings per CA upsert batch. SQL Server caps one request at 2,100 parameters and each reading takes
-    /// three plus the shared <c>@mli</c>, so 500 (1,501 parameters) leaves headroom. A typical file is one
-    /// or two batches.
+    /// Readings per CA call. One call carries a JSON array, so there is no parameter cap any more; 500 keeps a call
+    /// short (a typical file is one or two calls) and bounds the statement envdata expands with JSON_TABLE.
     /// </summary>
     internal const int MaxReadingsPerBatch = 500;
+
+    /// <summary><c>job_run.service</c> of this service's cycles.</summary>
+    public const string ServiceName = "waterservice";
 
     private readonly ISqlConnectionFactory _connectionFactory;
     private readonly ResiliencePipeline _sql;
@@ -34,14 +38,12 @@ public sealed class WaterDataRepository
     }
 
     /// <summary>
-    /// Saves all readings for a single water station in one transaction.
+    /// Saves all readings for a single Canadian station in one transaction.
     ///
-    /// <para>Readings are de-duplicated by timestamp (last one wins), then upserted through the legacy
-    /// <c>dbo.sp_UpdateWaterData</c> — the CSV "Water Level" maps to the legacy <c>elevation</c> column
-    /// and "Discharge" to <c>discharge</c>. The stored procedure itself owns the 15-day retention delete.</para>
-    ///
-    /// <para>The calls are sent as parameterised <c>EXEC</c> batches of up to <see cref="MaxReadingsPerBatch"/>
-    /// readings, so a station costs one or two round trips instead of one per reading.</para>
+    /// <para>Readings are de-duplicated by timestamp (last one wins), then upserted through
+    /// <c>sp_water_save_ca(mli, rows)</c>: the CSV "Water Level" is <c>e</c>, "Discharge" is <c>d</c>, the time is UTC.
+    /// The procedure overwrites a reading at the same time, stores <c>-999</c> as NULL and refreshes the station's
+    /// current state. Retention is not per call any more: <see cref="CleanOldWaterDataAsync"/> drops whole days.</para>
     /// </summary>
     public async Task SaveStationDataAsync(string mli, IReadOnlyList<Reading> readings, CancellationToken ct = default)
     {
@@ -62,27 +64,18 @@ public sealed class WaterDataRepository
 
         await _sql.ExecuteAsync(async token =>
         {
-            await using SqlConnection connection = await _connectionFactory.OpenAsync(token).ConfigureAwait(false);
-            await using SqlTransaction transaction =
-                (SqlTransaction)await connection.BeginTransactionAsync(token).ConfigureAwait(false);
+            await using MySqlConnection connection = await _connectionFactory.OpenAsync(token).ConfigureAwait(false);
+            await using MySqlTransaction transaction =
+                await connection.BeginTransactionAsync(token).ConfigureAwait(false);
 
-            // One round trip per chunk, not per reading: a CA file holds ~600 five-minute readings and the
-            // DB is ~75 ms away, so a per-row EXEC cost ~45 s per station (the Java twin batches too).
             foreach (Reading[] chunk in unique.Chunk(MaxReadingsPerBatch))
             {
                 await using var command = connection.CreateCommand();
                 command.Transaction = transaction;
                 command.CommandType = CommandType.Text;
-                command.CommandText = BuildExecBatch("dbo.sp_UpdateWaterData", "@mli", chunk.Length, "@s", "@e", "@d");
-                command.Parameters.Add("@mli", SqlDbType.VarChar, 64).Value = mli;
-                for (int i = 0; i < chunk.Length; i++)
-                {
-                    Reading reading = chunk[i];
-                    // The container runs in UTC, so store the UTC wall-clock (matches a UTC-timezone JVM).
-                    command.Parameters.Add("@s" + i, SqlDbType.DateTime2).Value = reading.Stamp.UtcDateTime;
-                    command.Parameters.Add("@e" + i, SqlDbType.Float).Value = (object?)reading.WaterLevel ?? DBNull.Value;
-                    command.Parameters.Add("@d" + i, SqlDbType.Float).Value = (object?)reading.Discharge ?? DBNull.Value;
-                }
+                command.CommandText = "CALL sp_water_save_ca(@mli, @rows)";
+                command.Parameters.Add("@mli", MySqlDbType.VarChar, 64).Value = mli;
+                command.Parameters.Add("@rows", MySqlDbType.JSON).Value = BuildCaRowsJson(chunk);
                 await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
             }
 
@@ -91,9 +84,10 @@ public sealed class WaterDataRepository
     }
 
     /// <summary>
-    /// Saves USGS station series using the legacy <c>dbo.sp_push_us_water_data</c> stored procedure.
-    /// Empty variable payloads are ignored rather than failing the whole station save. All of a station's
-    /// series go in one parameterised <c>EXEC</c> batch.
+    /// Saves all of one USGS station's series in ONE call to <c>sp_water_save_us(mli, state, series)</c>, which merges
+    /// every series of a day into one reading, converts the units and refreshes the station's current state
+    /// (until 10.8.0 each series was its own <c>sp_push_us_water_data</c> EXEC, so only the first series of a new day
+    /// reached the current state).
     /// </summary>
     public async Task SaveUsStationDataAsync(
         string mli, string state, IReadOnlyList<UsSeriesReading> seriesList, CancellationToken ct = default)
@@ -112,7 +106,7 @@ public sealed class WaterDataRepository
         }
 
         List<UsSeriesReading> series = seriesList
-            .Where(x => x is not null && !string.IsNullOrWhiteSpace(x.Name) && !string.IsNullOrWhiteSpace(x.XmlDoc))
+            .Where(x => x is not null && !string.IsNullOrWhiteSpace(x.Name) && double.IsFinite(x.Value))
             .ToList();
         if (series.Count == 0)
         {
@@ -121,69 +115,134 @@ public sealed class WaterDataRepository
 
         await _sql.ExecuteAsync(async token =>
         {
-            await using SqlConnection connection = await _connectionFactory.OpenAsync(token).ConfigureAwait(false);
-            await using SqlTransaction transaction =
-                (SqlTransaction)await connection.BeginTransactionAsync(token).ConfigureAwait(false);
-
-            // All of a station's series in one round trip (see SaveStationDataAsync).
+            await using MySqlConnection connection = await _connectionFactory.OpenAsync(token).ConfigureAwait(false);
             await using var command = connection.CreateCommand();
-            command.Transaction = transaction;
             command.CommandType = CommandType.Text;
-            command.CommandText = BuildExecBatch("dbo.sp_push_us_water_data", "@mli, @state", series.Count, "@n", "@u", "@x");
-            command.Parameters.Add("@mli", SqlDbType.NVarChar, 128).Value = mli;
-            command.Parameters.Add("@state", SqlDbType.NVarChar, 128).Value = state;
-            for (int i = 0; i < series.Count; i++)
-            {
-                command.Parameters.Add("@n" + i, SqlDbType.NVarChar, 128).Value = series[i].Name;
-                command.Parameters.Add("@u" + i, SqlDbType.VarChar, 64).Value = (object?)series[i].Unit ?? DBNull.Value;
-                command.Parameters.Add("@x" + i, SqlDbType.Xml).Value = series[i].XmlDoc;
-            }
-            await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
-
-            await transaction.CommitAsync(token).ConfigureAwait(false);
-        }, ct).ConfigureAwait(false);
-    }
-
-    /// <summary>Pushes lake species associations down to stations (<c>dbo.spPushSpeciesFromLakeToStation</c>).</summary>
-    public Task PushSpeciesFromLakeToStationAsync(CancellationToken ct = default) =>
-        ExecuteProcedureAsync("dbo.spPushSpeciesFromLakeToStation", ct);
-
-    /// <summary>Deletes stale water data after each cycle (<c>dbo.sp_clean_old_water_data</c>).</summary>
-    public Task CleanOldWaterDataAsync(CancellationToken ct = default) =>
-        ExecuteProcedureAsync("dbo.sp_clean_old_water_data", ct);
-
-    private async Task ExecuteProcedureAsync(string procedure, CancellationToken ct)
-    {
-        await _sql.ExecuteAsync(async token =>
-        {
-            await using SqlConnection connection = await _connectionFactory.OpenAsync(token).ConfigureAwait(false);
-            await using var command = connection.CreateCommand();
-            command.CommandType = CommandType.StoredProcedure;
-            command.CommandText = procedure;
-            // ExecuteNonQuery runs the whole batch and tolerates procedures that emit incidental result
-            // sets or update counts (they are simply discarded), matching the Java result-set draining.
+            command.CommandText = "CALL sp_water_save_us(@mli, @state, @series)";
+            command.Parameters.Add("@mli", MySqlDbType.VarChar, 64).Value = mli;
+            command.Parameters.Add("@state", MySqlDbType.VarChar, 2).Value = state.Length > 2 ? state[..2] : state;
+            command.Parameters.Add("@series", MySqlDbType.JSON).Value = BuildUsSeriesJson(series);
             await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Builds a parameterised batch of <paramref name="count"/> <c>EXEC</c> calls of one procedure, so a whole
-    /// station is written in one round trip. Call <c>i</c> passes the shared parameters followed by
-    /// <c>{prefix}{i}</c> for each per-call prefix, e.g. <c>EXEC dbo.p @mli, @s0, @e0, @d0;</c>.
+    /// Records one finished cycle in envdata's <c>job_run</c> (<c>sp_job_run_record</c>). env_service picks unhanded
+    /// cycles up and does the fish hand-over to SQL Server (species push + probability update), which this service did
+    /// itself until 10.8.0.
     /// </summary>
-    internal static string BuildExecBatch(string procedure, string sharedParameters, int count, params string[] prefixes)
+    public async Task RecordCycleAsync(
+        string job, DateTime startedUtc, DateTime finishedUtc, string status, int items, string? note,
+        CancellationToken ct = default)
     {
-        var sql = new StringBuilder(count * (procedure.Length + sharedParameters.Length + 32));
-        for (int i = 0; i < count; i++)
+        await _sql.ExecuteAsync(async token =>
         {
-            sql.Append("EXEC ").Append(procedure).Append(' ').Append(sharedParameters);
-            foreach (string prefix in prefixes)
+            await using MySqlConnection connection = await _connectionFactory.OpenAsync(token).ConfigureAwait(false);
+            await using var command = connection.CreateCommand();
+            command.CommandType = CommandType.Text;
+            command.CommandText =
+                "CALL sp_job_run_record(@service, @job, @started, @finished, @status, @items, @note, @out_job_run_id)";
+            command.Parameters.Add("@service", MySqlDbType.VarChar, 32).Value = ServiceName;
+            command.Parameters.Add("@job", MySqlDbType.VarChar, 32).Value = job;
+            command.Parameters.Add("@started", MySqlDbType.DateTime).Value = startedUtc;
+            command.Parameters.Add("@finished", MySqlDbType.DateTime).Value = finishedUtc;
+            command.Parameters.Add("@status", MySqlDbType.VarChar, 16).Value = status;
+            command.Parameters.Add("@items", MySqlDbType.Int32).Value = items;
+            command.Parameters.Add("@note", MySqlDbType.VarChar, 255).Value =
+                note is null ? DBNull.Value : (note.Length > 255 ? note[..255] : note);
+            await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Retention after each cycle (<c>sp_clean_old_water_data(NULL)</c>: raw readings 30 days by dropping whole day
+    /// partitions, daily aggregates and job runs 30 days). Partition DDL commits implicitly, so this runs on its own
+    /// connection, never inside a transaction. A no-op on most calls: only a new day adds or drops a partition.
+    /// </summary>
+    public async Task CleanOldWaterDataAsync(CancellationToken ct = default)
+    {
+        await _sql.ExecuteAsync(async token =>
+        {
+            await using MySqlConnection connection = await _connectionFactory.OpenAsync(token).ConfigureAwait(false);
+            await using var command = connection.CreateCommand();
+            command.CommandType = CommandType.Text;
+            command.CommandText = "CALL sp_clean_old_water_data(NULL)";
+            await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The <c>rows</c> JSON of <c>sp_water_save_ca</c>: <c>[{"s":"yyyy-MM-dd HH:mm:ss","e":level,"d":discharge}]</c>,
+    /// time in UTC, a missing or non-finite value as <c>null</c>.
+    /// </summary>
+    internal static string BuildCaRowsJson(IEnumerable<Reading> readings)
+    {
+        using var buffer = new MemoryStream();
+        using (var json = new Utf8JsonWriter(buffer))
+        {
+            json.WriteStartArray();
+            foreach (Reading reading in readings)
             {
-                sql.Append(", ").Append(prefix).Append(i);
+                json.WriteStartObject();
+                json.WriteString("s", reading.Stamp.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
+                WriteNumberOrNull(json, "e", reading.WaterLevel);
+                WriteNumberOrNull(json, "d", reading.Discharge);
+                json.WriteEndObject();
             }
-            sql.Append(";\n");
+            json.WriteEndArray();
         }
-        return sql.ToString();
+        return System.Text.Encoding.UTF8.GetString(buffer.ToArray());
+    }
+
+    /// <summary>
+    /// The <c>series</c> JSON of <c>sp_water_save_us</c>:
+    /// <c>[{"name":"Streamflow","unit":"ft^3/s","points":[{"d":"yyyy-MM-dd","v":12.5}]}]</c>, one point per series
+    /// (the station's local day), grouped by name and unit.
+    /// </summary>
+    internal static string BuildUsSeriesJson(IEnumerable<UsSeriesReading> series)
+    {
+        using var buffer = new MemoryStream();
+        using (var json = new Utf8JsonWriter(buffer))
+        {
+            json.WriteStartArray();
+            foreach (IGrouping<(string Name, string? Unit), UsSeriesReading> group in series.GroupBy(s => (s.Name, s.Unit)))
+            {
+                json.WriteStartObject();
+                json.WriteString("name", group.Key.Name);
+                if (group.Key.Unit is null)
+                {
+                    json.WriteNull("unit");
+                }
+                else
+                {
+                    json.WriteString("unit", group.Key.Unit);
+                }
+                json.WriteStartArray("points");
+                foreach (UsSeriesReading point in group)
+                {
+                    json.WriteStartObject();
+                    json.WriteString("d", point.Day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+                    json.WriteNumber("v", point.Value);
+                    json.WriteEndObject();
+                }
+                json.WriteEndArray();
+                json.WriteEndObject();
+            }
+            json.WriteEndArray();
+        }
+        return System.Text.Encoding.UTF8.GetString(buffer.ToArray());
+    }
+
+    private static void WriteNumberOrNull(Utf8JsonWriter json, string name, double? value)
+    {
+        if (value is double v && double.IsFinite(v))
+        {
+            json.WriteNumber(name, v);
+        }
+        else
+        {
+            json.WriteNull(name);
+        }
     }
 
     /// <summary>

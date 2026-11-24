@@ -6,11 +6,10 @@
     <AssemblyName>WeatherService</AssemblyName>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <!-- NOTE: do NOT enable InvariantGlobalization — Microsoft.Data.SqlClient throws
-         "Globalization Invariant Mode is not supported" at connection open. The runtime image
-         installs ICU (libicu) instead. -->
+    <!-- NOTE: do NOT enable InvariantGlobalization (platform rule; Microsoft.Data.SqlClient, used up to 10.5.0, threw
+         "Globalization Invariant Mode is not supported" at connection open). The runtime image installs ICU (libicu). -->
     <!-- Version drives the /actuator/health "version" field; keep in step with the release tag. -->
-    <Version>10.5.0</Version>
+    <Version>11.0.0</Version>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
   </PropertyGroup>
 
@@ -24,7 +23,7 @@
 
   <ItemGroup>
     <!-- SQL Server driver (cross-platform, runs on Debian in the container). -->
-    <PackageReference Include="Microsoft.Data.SqlClient" Version="6.0.2" />
+    <PackageReference Include="MySqlConnector" Version="2.6.2" />
     <!-- Cron parsing for the weekly report trigger (6-field with seconds, like Spring cron). -->
     <PackageReference Include="Cronos" Version="0.11.1" />
     <!-- Resilience: retry + circuit breaker (Resilience4j equivalent). -->

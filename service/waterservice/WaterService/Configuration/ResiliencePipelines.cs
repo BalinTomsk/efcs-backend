@@ -1,5 +1,5 @@
 using System.Data.Common;
-using Microsoft.Data.SqlClient;
+using MySqlConnector;
 using Microsoft.Extensions.Logging;
 using Polly;
 using Polly.CircuitBreaker;
@@ -98,9 +98,18 @@ public static class ResiliencePipelines
         serviceProvider.GetRequiredService<ILoggerFactory>()
             .CreateLogger("WaterService.Resilience." + name);
 
-    /// <summary>Transient SQL failures worth retrying / tripping the breaker.</summary>
-    private static bool IsSqlFailure(Exception ex) =>
-        ex is SqlException or DbException or TimeoutException;
+    /// <summary>
+    /// SQL failures worth retrying / tripping the breaker: any database or timeout error, EXCEPT an envdata procedure's
+    /// own refusal (SQLSTATE 45000, e.g. "unknown station mli"). That is a bad request, not an outage: retrying it
+    /// changes nothing, and counting it would let one bad station open the breaker for every other one.
+    /// </summary>
+    internal static bool IsSqlFailure(Exception ex) =>
+        ex switch
+        {
+            MySqlException mysql when mysql.SqlState == "45000" => false,
+            DbException or TimeoutException => true,
+            _ => false,
+        };
 
     /// <summary>
     /// Transient HTTP failures (network errors, premature EOF, socket/read timeouts, 5xx). A 404 is

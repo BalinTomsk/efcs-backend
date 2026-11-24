@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text;
 using Microsoft.Extensions.Logging;
 using WaterService.Data;
 using WaterService.Domain;
@@ -71,7 +70,7 @@ public class StationProcessorUS : StationProcessorBase
     }
 
     /// <summary>
-    /// Turns a station's latest USGS values into stored-procedure payloads, one per series, named and
+    /// Turns a station's latest USGS values into one point per series for envdata's sp_water_save_us, named and
     /// united as the legacy WaterML feed named them (<see cref="UsgsParameterMap"/>) and dated by the
     /// station's local day. Unmapped parameters, non-instantaneous statistics and non-numeric values are
     /// dropped.
@@ -87,41 +86,29 @@ public class StationProcessorUS : StationProcessorBase
             }
 
             UsgsParameterMap.LegacyName? legacy = UsgsParameterMap.Find(observation.ParameterCode);
-            string? value = NormalizeNumericValue(observation.Value);
+            double? value = ParseNumericValue(observation.Value);
             if (legacy is null || value is null)
             {
                 continue;
             }
 
-            DateTime day = TimeZoneInfo.ConvertTime(observation.Time, zone).Date;
-            string xmlDoc = new StringBuilder("<root><a d=\"")
-                .Append(day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))
-                .Append("\" v=\"")
-                .Append(EscapeXml(value))
-                .Append("\" /></root>")
-                .ToString();
-            results.Add(new UsSeriesReading(legacy.Name, legacy.Unit, xmlDoc));
+            DateOnly day = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(observation.Time, zone).Date);
+            results.Add(new UsSeriesReading(legacy.Name, legacy.Unit, day, value.Value));
         }
 
         return results;
     }
 
-    private static string? NormalizeNumericValue(string? value)
+    private static double? ParseNumericValue(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
             return null;
         }
 
-        string trimmed = value.Trim();
-        return double.TryParse(trimmed, NumberStyles.Float, CultureInfo.InvariantCulture, out _)
-            ? trimmed
+        return double.TryParse(value.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed)
+               && double.IsFinite(parsed)
+            ? parsed
             : null;
     }
-
-    private static string EscapeXml(string value) =>
-        value.Replace("&", "&amp;")
-             .Replace("\"", "&quot;")
-             .Replace("<", "&lt;")
-             .Replace(">", "&gt;");
 }
