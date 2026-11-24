@@ -8,7 +8,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- do NOT enable InvariantGlobalization: Microsoft.Data.SqlClient throws at connection open without ICU. -->
     <!-- The only place the version lives; /health and the startup line show it. -->
-    <Version>0.2.0</Version>
+    <Version>0.3.0</Version>
   </PropertyGroup>
 
   <ItemGroup>

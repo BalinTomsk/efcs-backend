@@ -49,3 +49,12 @@ public sealed class SqlServerHealthCheck(EnvConnections connections) : IHealthCh
         }
     }
 }
+
+/// <summary>Readiness: the REST station cache has loaded at least once (before that every station read answers 503).</summary>
+public sealed class StationCacheHealthCheck(EnvService.Reads.StationCache cache) : IHealthCheck
+{
+    public Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken ct = default) =>
+        Task.FromResult(cache.Current is { } s
+            ? HealthCheckResult.Healthy($"{s.Count} stations, loaded {s.LoadedUtc:O}")
+            : HealthCheckResult.Unhealthy("Station cache not loaded yet."));
+}

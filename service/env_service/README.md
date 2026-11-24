@@ -4,10 +4,26 @@ The water/weather service of FishFind (C# / .NET 10). It will serve every water,
 the MySQL `envdata` database and hand the fish-model input over to SQL Server. Plan and status:
 `docs/env_service_plan.md` (git-ignored; workstation only). Schema: `envfish-db/mysql/envdata`.
 
-**Built so far:** `EnvService` 0.2.0 (plan steps 4-5: station mirror, hand-over, fish model behind a switch) and `EnvService.Migrator`
-(step 3, one-off). The REST API (`/api/v1/env/*`) comes with step 6.
+**Built so far:** `EnvService` 0.3.0 (plan steps 4-6a: station mirror, hand-over, fish model behind a switch, the
+station and water-body reads of `/api/v1/env/*`) and `EnvService.Migrator` (step 3, one-off). The forecast endpoints
+come with step 6b.
 
-## EnvService 0.2.0 — two background jobs
+## EnvService 0.3.0 — the read API (port 8080)
+
+Metric, pressure in mm Hg, times UTC, envelope `{data, error, meta}`. Contracts: `docs/api-reference.html`.
+
+| Path | Answer |
+|---|---|
+| `GET /api/v1/env/stations/{sid}` | the station: identity, place, water-body link |
+| `GET /api/v1/env/stations/{sid}/current` | its newest values and flow state |
+| `GET /api/v1/env/stations/{sid}/weather?from=&to=` | daily weather with the day's pressure state (≤ 31 days; default 15 back .. 15 ahead) |
+| `GET /api/v1/env/lakes/{lakeId}/stations` | the stations of a water body |
+| `GET /api/v1/env/lakes/{lakeId}/weather?date=` | each of its stations with current values and that day's weather |
+
+Stations are served from a cache of envdata `v_station_info` (job `stations`, every 15 min); current values and weather
+are primary-key reads of `v_station_state` / `v_weather_day`.
+
+## EnvService — the background jobs
 
 - **mirror** (startup, then hourly): SQL Server `env.fn_station_list()` → envdata `sp_station_mirror` (~11,700
   stations, `hasFish` included).
@@ -20,14 +36,14 @@ the MySQL `envdata` database and hand the fish-model input over to SQL Server. P
 
 | Port | Paths |
 |---|---|
-| 8080 (public) | `/health` |
-| 8081 (private) | `/health/live`, `/health/ready` (envdata + SQL Server), `/metrics`, `GET /admin/jobs`, `POST /admin/run/{mirror\|handover}` |
+| 8080 (public) | `/health`, `/api/v1/env/*` |
+| 8081 (private) | `/health/live`, `/health/ready` (envdata + SQL Server + station cache), `/metrics`, `GET /admin/jobs`, `POST /admin/run/{mirror\|handover\|stations}` |
 
 | Variable | Meaning |
 |---|---|
 | `MYSQL_URL` / `MYSQL_USERNAME` / `MYSQL_PASSWORD` | envdata (required) |
 | `DB_URL` / `DB_USERNAME` / `DB_PASSWORD` | SQL Server, schema `env` (required) |
-| `Env__MirrorIntervalMinutes`, `Env__HandOverPollSeconds`, `Env__HandOverMaxAgeMinutes`, `Env__PushBatchSize`, `Env__MirrorEnabled`, `Env__HandOverEnabled` | job settings (60, 300, 60, 1000, true, true) |
+| `Env__MirrorIntervalMinutes`, `Env__HandOverPollSeconds`, `Env__HandOverMaxAgeMinutes`, `Env__PushBatchSize`, `Env__StationCacheMinutes`, `Env__MirrorEnabled`, `Env__HandOverEnabled` | job settings (60, 300, 60, 1000, 15, true, true) |
 | `RABBITMQ_*`, `STATUS_MACHINE` | optional status-page heartbeats |
 
 ## EnvService.Migrator — the one-off copy of the SQL Server data

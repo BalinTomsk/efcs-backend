@@ -23,6 +23,7 @@ public sealed class ApiExceptionHandler : IExceptionHandler
         {
             InvalidRequestException e => (StatusCodes.Status400BadRequest, "invalid_request", e.Message),
             NotFoundException e => (StatusCodes.Status404NotFound, "not_found", e.Message),
+            ServiceUnavailableException e => (StatusCodes.Status503ServiceUnavailable, "unavailable", e.Message),
             _ => (StatusCodes.Status500InternalServerError, "internal_error", "An unexpected error occurred"),
         };
 

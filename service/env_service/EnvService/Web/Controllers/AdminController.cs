@@ -1,4 +1,5 @@
 using EnvService.Jobs;
+using EnvService.Reads;
 using Microsoft.AspNetCore.Mvc;
 
 namespace EnvService.Web.Controllers;
@@ -6,11 +7,12 @@ namespace EnvService.Web.Controllers;
 /// <summary>
 /// Operations, on the PRIVATE management port 8081 only (Program.cs refuses <c>/admin/*</c> on 8080):
 /// <c>GET /admin/jobs</c> (latest outcome of every job) and <c>POST /admin/run/{job}</c> (run one now and wait;
-/// <c>mirror</c> or <c>handover</c>, the latter even with nothing pending). Envelope <c>{data,error,meta}</c>.
+/// <c>mirror</c>, <c>handover</c> (even with nothing pending) or <c>stations</c> (the REST station cache)). Envelope <c>{data,error,meta}</c>.
 /// </summary>
 [ApiController]
 [Route("admin")]
-public sealed class AdminController(JobStatus status, StationMirrorJob mirror, HandOverJob handOver) : ControllerBase
+public sealed class AdminController(
+    JobStatus status, StationMirrorJob mirror, HandOverJob handOver, StationCacheJob stations) : ControllerBase
 {
     [HttpGet("jobs")]
     public ApiResponse<IReadOnlyList<JobRun>> Jobs() => ApiResponse<IReadOnlyList<JobRun>>.Ok(status.Snapshot());
@@ -22,7 +24,8 @@ public sealed class AdminController(JobStatus status, StationMirrorJob mirror, H
         {
             StationMirrorJob.Name => await mirror.RunOnceAsync(ct),
             HandOverJob.Name => await handOver.RunOnceAsync(force: true, ct),
-            _ => throw new NotFoundException($"Unknown job '{job}' (mirror, handover)"),
+            StationCacheJob.Name => await stations.RunOnceAsync(ct),
+            _ => throw new NotFoundException($"Unknown job '{job}' (mirror, handover, stations)"),
         };
         return ApiResponse<JobRun?>.Ok(run);
     }
