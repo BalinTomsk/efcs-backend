@@ -5,6 +5,12 @@ All notable changes go in this file, newest first, with the reason. Format:
 
 ## [Unreleased]
 
+### Changed
+- **EnvService 0.4.1** (2026-11-25, built, not deployed): the forecast plot's pressure series is `pressureMm` (was
+  `pressure`). The envfish-droid app reads `plot.pressure` as hPa (inHg for US stations, an hPa-sized axis), so mm
+  values under the old key would be drawn as hPa; renamed, not refilled (plan decision 2), an app build that does not
+  know mm shows no pressure instead of a wrong one. `units.pressure` stays `mmHg`.
+
 ### Added
 - **EnvService 0.4.0** (2026-11-25, LIVE on csnode 2026-11-24 23:32 UTC): plan step 6b, the three forecast documents, the bodies docapi's
   `/api/v1/forecast/*` will return from step 6c on: `GET /api/v1/env/forecast/stations?fish=&lat=&lon=&radius=&country=&limit=`,

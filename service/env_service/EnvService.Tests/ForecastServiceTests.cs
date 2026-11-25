@@ -140,7 +140,9 @@ public class ForecastServiceTests
         await Assert.That((string?)plot["date"]![0]).IsEqualTo("Tue 10");
         await Assert.That((string?)plot["date"]![15]).IsEqualTo("Wed 25");
         await Assert.That((string?)plot["units"]!["pressure"]).IsEqualTo("mmHg");
-        await Assert.That((decimal?)plot["pressure"]![15]).IsEqualTo(755.0m);
+        // renamed, not refilled: an app build that reads "pressure" as hPa finds no series instead of mm values
+        await Assert.That((decimal?)plot["pressureMm"]![15]).IsEqualTo(755.0m);
+        await Assert.That(plot.AsObject().ContainsKey("pressure")).IsFalse();
         await Assert.That((double?)plot["discharge"]![14]).IsEqualTo(15.123);
         await Assert.That((double?)plot["level"]![14]).IsEqualTo(307.238);
         await Assert.That(plot["discharge"]![15]).IsNull();

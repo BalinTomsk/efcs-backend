@@ -190,7 +190,7 @@ public sealed class ForecastService : IDisposable
             ["temperature"] = temperature,
             ["turbidity"] = turbidity,
             ["level"] = level,
-            ["pressure"] = pressure,
+            ["pressureMm"] = pressure,
         };
     }
 

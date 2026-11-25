@@ -4,7 +4,7 @@ All notable changes to `csnews-env` (named `news_search` up to 0.5.0). Say **why
 
 ## [Unreleased]
 
-## [0.6.0] — 2026-11-23 (not deployed)
+## [0.6.0] — 2026-11-23 (LIVE on csnode 2026-11-25 04:27 UTC; MySQL news keys enc:v1 on the volume)
 
 ### Changed
 - **Renamed `news_search` → `csnews-env`** (owner decision): folder `service/csnews-env`, project `CsNews`,
