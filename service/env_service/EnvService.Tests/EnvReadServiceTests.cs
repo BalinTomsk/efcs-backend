@@ -32,6 +32,14 @@ internal sealed class FakeReadStore : IEnvReadStore
         return Task.FromResult((IReadOnlyList<WeatherDayRow>)Weather
             .Where(w => sids.Contains(w.Sid) && w.Dt >= from && w.Dt <= to).ToList());
     }
+
+    public List<WaterDayRow> Water { get; } = [];
+
+    public Task<IReadOnlyList<WaterDayRow>> WaterDaysAsync(int sid, DateOnly from, DateOnly to, CancellationToken ct)
+    {
+        Calls++;
+        return Task.FromResult((IReadOnlyList<WaterDayRow>)Water.Where(w => w.Sid == sid && w.Dt >= from && w.Dt <= to).ToList());
+    }
 }
 
 public class EnvReadServiceTests
@@ -219,5 +227,8 @@ public class EnvReadServiceTests
 
         public Task<IReadOnlyList<WeatherDayRow>> WeatherAsync(
             IReadOnlyCollection<int> sids, DateOnly from, DateOnly to, CancellationToken ct) => throw new TimeoutException("down");
+
+        public Task<IReadOnlyList<WaterDayRow>> WaterDaysAsync(int sid, DateOnly from, DateOnly to, CancellationToken ct) =>
+            throw new TimeoutException("down");
     }
 }

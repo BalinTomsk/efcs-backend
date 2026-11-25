@@ -32,6 +32,9 @@ Deploy runbook: `docs/do-update.md`. Endpoint contracts: `docs/api-reference.htm
 - **Reads (`/api/v1/env/*`):** validate first (400 before any read); stations only from `StationCache` (never a
   per-request station scan); everything else a primary-key range of an envdata view through the `sql-read` pipeline;
   a failed refresh keeps the last snapshot, 503 only before the first load. Metric, pressure mm Hg, times UTC.
+- **Forecast (`/api/v1/env/forecast/*`):** the fish half only from SQL Server `env.fn_*` functions (never a new
+  SQL Server TABLE: on 2026-11-24 `env.*` tables took the website down through its schema cache), the water and
+  weather half from envdata views; docapi's parameter rules; check `dbo.LogException` after any prod SQL apply.
 - **Exposure (later REST):** through cproxy and the VPC only; every route under `/api/v1/env/`.
 - **Sized before deploy:** memory cap + the 150 MB guard; verify by restart count, never a log tail.
 - No `InvariantGlobalization`; option collections default to **empty**; tests in TUnit.
@@ -40,6 +43,6 @@ Deploy runbook: `docs/do-update.md`. Endpoint contracts: `docs/api-reference.htm
 
 ```bash
 dotnet build EnvService.slnx
-dotnet run --project EnvService.Tests            # 27 tests (job logic and reads with fakes, TVP/JSON contracts, ports)
+dotnet run --project EnvService.Tests            # 36 tests (job logic and reads with fakes, TVP/JSON contracts, ports)
 dotnet run --project EnvService.Migrator.Tests   # 11 tests (conversions)
 ```

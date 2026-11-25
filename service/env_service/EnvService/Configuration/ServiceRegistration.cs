@@ -33,6 +33,9 @@ public static class ServiceRegistration
         services.AddSingleton<StationCacheJob>();
         services.AddHostedService(sp => sp.GetRequiredService<StationCacheJob>());
         services.AddSingleton<EnvReadService>();
+        services.AddSingleton<IForecastStore>(sp =>
+            new SqlForecastStore(connections.SqlServer, sp.GetRequiredService<ResiliencePipelineProvider<string>>()));
+        services.AddSingleton<ForecastService>();
 
         services.AddSingleton<JobStatus>();
         services.AddSingleton<StationMirrorJob>();

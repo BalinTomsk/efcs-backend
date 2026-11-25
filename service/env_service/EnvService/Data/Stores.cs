@@ -42,6 +42,9 @@ public interface IEnvReadStore
 
     /// <summary><c>v_weather_day</c> of these stations from <paramref name="from"/> to <paramref name="to"/> inclusive.</summary>
     Task<IReadOnlyList<WeatherDayRow>> WeatherAsync(IReadOnlyCollection<int> sids, DateOnly from, DateOnly to, CancellationToken ct);
+
+    /// <summary><c>v_water_day</c> of one station from <paramref name="from"/> to <paramref name="to"/> inclusive.</summary>
+    Task<IReadOnlyList<WaterDayRow>> WaterDaysAsync(int sid, DateOnly from, DateOnly to, CancellationToken ct);
 }
 
 /// <summary>
