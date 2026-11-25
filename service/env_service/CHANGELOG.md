@@ -5,8 +5,17 @@ All notable changes go in this file, newest first, with the reason. Format:
 
 ## [Unreleased]
 
+### Added
+- **EnvService 0.5.0** (2026-11-25, LIVE on csnode 06:25 UTC; CA 1,777 + US 8,876 pins, all identical to waterapi's; waterapi's 855 extra pins are stations silent 15+ days with no envdata state row): `GET /api/v1/env/stations/map?country=&state=`, the station
+  map, so the portal can leave waterapi (plan step 6c, "moves the waterapi map path"; waterapi retires in step 7).
+  waterapi's `/api/v1/water/station/map` body field for field (`{country, state, count, loadedUtc, stations:[{sid, key,
+  lat, lon, state, stamp}]}`, `key` = sid in base 36), the same ETag shape (`"CA-ALL-<load ticks hex>-<count>"`), 304
+  on `If-None-Match`, `Cache-Control: public, max-age=300`, CA and US only, the same 400 messages. Pins = the stations
+  that have reported (`lastReading` not null), outside HI and PR, as `dbo.vMapView` chose; `stamp` = the last reading.
+  Answered from the station cache (computed once per load), never a database read. Tests 39/39 (3 new).
+
 ### Changed
-- **EnvService 0.4.1** (2026-11-25, built, not deployed): the forecast plot's pressure series is `pressureMm` (was
+- **EnvService 0.4.1** (2026-11-25, LIVE on csnode 04:44 UTC): the forecast plot's pressure series is `pressureMm` (was
   `pressure`). The envfish-droid app reads `plot.pressure` as hPa (inHg for US stations, an hPa-sized axis), so mm
   values under the old key would be drawn as hPa; renamed, not refilled (plan decision 2), an app build that does not
   know mm shows no pressure instead of a wrong one. `units.pressure` stays `mmHg`.

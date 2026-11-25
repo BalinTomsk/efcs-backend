@@ -91,6 +91,75 @@ public class EnvReadServiceTests
         await Assert.That(() => cold.Station(12)).Throws<ServiceUnavailableException>();
     }
 
+    private static StationInfo Pin(int sid, string country, string? state, DateTime? lastReading) => new(
+        sid, "M" + sid, Guid.NewGuid().ToString(), country, state, 45.5, -79.25, -5, 2, "gauge " + sid, null, "", null, null,
+        true, true, lastReading, null);
+
+    private static EnvReadService MapService(StationCache cache) =>
+        new(cache, new FakeReadStore(), new FakeTimeProvider(Now));
+
+    [Test]
+    public async Task StationMap_StationsWithAReadingOnly_ByCountry_SortedBySid_AsWaterapi()
+    {
+        var cache = new StationCache();
+        cache.Load([
+            Pin(263682, "CA", "ON", Now.AddHours(-2)),
+            Pin(12, "CA", "BC", Now.AddDays(-30)),
+            Pin(77, "CA", "QC", null),            // never reported: not on the map (vMapView joins CurrentWaterState)
+            Pin(5, "US", "MN", Now.AddHours(-1)),
+            Pin(6, "US", "HI", Now.AddHours(-1)), // vMapView leaves out HI and PR
+            Pin(7, "US", "PR", Now.AddHours(-1)),
+            Pin(8, "MX", "BC", Now.AddHours(-1)), // only CA and US are served
+        ], Now);
+
+        StationMapResult ca = MapService(cache).StationMap("ca", null);
+
+        await Assert.That(ca.Body.Country).IsEqualTo("CA");
+        await Assert.That(ca.Body.State).IsNull();
+        await Assert.That(ca.Body.Count).IsEqualTo(2);
+        await Assert.That(ca.Body.LoadedUtc).IsEqualTo(Now);
+        await Assert.That(ca.Body.Stations.Select(p => p.Sid).ToList()).IsEquivalentTo(new List<int> { 12, 263682 });
+        StationPinDto pin = ca.Body.Stations[1];
+        await Assert.That(pin.Key).IsEqualTo("5NGI");   // base 36, the key the map's links carry
+        await Assert.That(pin.State).IsEqualTo("ON");
+        await Assert.That(pin.Stamp).IsEqualTo(Now.AddHours(-2));
+        await Assert.That(ca.ETag).IsEqualTo($"\"CA-ALL-{Now.Ticks:x}-2\"");
+
+        StationMapResult us = MapService(cache).StationMap(" US ", null);
+        await Assert.That(us.Body.Stations.Select(p => p.Sid).ToList()).IsEquivalentTo(new List<int> { 5 });
+    }
+
+    [Test]
+    public async Task StationMap_StateFilter_ETagPerViewAndPerLoad()
+    {
+        var cache = new StationCache();
+        cache.Load([Pin(1, "CA", "ON", Now), Pin(2, "CA", "BC", Now), Pin(3, "CA", "ON", Now)], Now);
+        EnvReadService s = MapService(cache);
+
+        StationMapResult on = s.StationMap("CA", "on");
+
+        await Assert.That(on.Body.State).IsEqualTo("ON");
+        await Assert.That(on.Body.Count).IsEqualTo(2);
+        await Assert.That(on.ETag).IsEqualTo($"\"CA-ON-{Now.Ticks:x}-3\"");
+
+        cache.Load([Pin(1, "CA", "ON", Now)], Now.AddMinutes(15));
+        await Assert.That(s.StationMap("CA", "ON").ETag).IsNotEqualTo(on.ETag);
+    }
+
+    [Test]
+    public async Task StationMap_BadCountryOrStateIs400_NotLoadedIs503()
+    {
+        var cache = new StationCache();
+        cache.Load([Pin(1, "CA", "ON", Now)], Now);
+        EnvReadService s = MapService(cache);
+
+        await Assert.That(() => s.StationMap(null, null)).Throws<InvalidRequestException>();
+        await Assert.That(() => s.StationMap("MX", null)).Throws<InvalidRequestException>();
+        await Assert.That(() => s.StationMap("CA", "ONT")).Throws<InvalidRequestException>();
+        await Assert.That(() => s.StationMap("CA", "O1")).Throws<InvalidRequestException>();
+        await Assert.That(() => MapService(new StationCache()).StationMap("CA", null)).Throws<ServiceUnavailableException>();
+    }
+
     [Test]
     public async Task Current_NeverReportedIsNull_ElseTheRow()
     {

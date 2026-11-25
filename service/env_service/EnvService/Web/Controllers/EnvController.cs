@@ -11,6 +11,23 @@ namespace EnvService.Web.Controllers;
 [Route("api/v1/env")]
 public sealed class EnvController(EnvReadService reads) : ControllerBase
 {
+    /// <summary>
+    /// The station map (plan step 6c, replaces waterapi's <c>/api/v1/water/station/map</c>): every pin of a country, or
+    /// one province/state, from the station cache. <c>If-None-Match</c> with the current ETag answers 304.
+    /// </summary>
+    [HttpGet("stations/map")]
+    public IActionResult StationMap([FromQuery] string? country, [FromQuery] string? state)
+    {
+        StationMapResult map = reads.StationMap(country, state);
+        Response.Headers.ETag = map.ETag;
+        Response.Headers.CacheControl = $"public, max-age={EnvReadService.MapClientMaxAgeSeconds}";
+        if (Request.Headers.IfNoneMatch.Any(v => v is not null && v.Split(',').Any(t => t.Trim() == map.ETag)))
+        {
+            return StatusCode(StatusCodes.Status304NotModified);
+        }
+        return Ok(ApiResponse<StationMapDto>.Ok(map.Body));
+    }
+
     /// <summary>One station: identity, place, water-body link, last reading/weather time.</summary>
     [HttpGet("stations/{sid}")]
     public ApiResponse<StationDto> Station(string sid) => ApiResponse<StationDto>.Ok(reads.Station(Sid(sid)));

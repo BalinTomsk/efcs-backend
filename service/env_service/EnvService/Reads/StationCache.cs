@@ -34,7 +34,26 @@ public sealed class StationCache
                     g => g.Key.ToLowerInvariant(),
                     g => (IReadOnlyList<StationInfo>)g.OrderBy(s => s.Mli, StringComparer.Ordinal).ToList(),
                     StringComparer.OrdinalIgnoreCase);
+            MapByCountry = stations
+                .Where(OnMap)
+                .GroupBy(s => s.Country.Trim().ToUpperInvariant(), StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => (IReadOnlyList<StationInfo>)g.OrderBy(s => s.Sid).ToList(), StringComparer.Ordinal);
         }
+
+        /// <summary>The countries the station map serves (waterapi's set).</summary>
+        public static readonly string[] MapCountries = ["CA", "US"];
+
+        /// <summary>
+        /// On the station map, as SQL Server's <c>dbo.vMapView</c> chose (waterapi, plan step 6c): the station has reported
+        /// at least once, is in a map country, and is not in Hawaii or Puerto Rico.
+        /// </summary>
+        public static bool OnMap(StationInfo s) =>
+            s.UpdData is not null
+            && MapCountries.Contains(s.Country.Trim().ToUpperInvariant(), StringComparer.Ordinal)
+            && s.State?.Trim().ToUpperInvariant() is not ("HI" or "PR");
+
+        /// <summary>The map pins by country (key upper case), ordered by sid.</summary>
+        public IReadOnlyDictionary<string, IReadOnlyList<StationInfo>> MapByCountry { get; }
 
         public DateTime LoadedUtc { get; }
 
