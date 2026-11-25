@@ -71,6 +71,44 @@ public sealed class EnvReadService(StationCache cache, IEnvReadStore store, Time
                 weatherBySid.TryGetValue(s.Sid, out WeatherDayRow? w) ? WeatherDayDto.Of(w) : null)).ToList());
     }
 
+    /// <summary>How long a browser may reuse a map answer before revalidating with its ETag (waterapi's value).</summary>
+    public const int MapClientMaxAgeSeconds = 300;
+
+    /// <summary>
+    /// Every map pin of a country, optionally one province/state: waterapi's <c>/api/v1/water/station/map</c> body,
+    /// answered from the station cache (no database read). The ETag changes with every cache load and names the view.
+    /// </summary>
+    public StationMapResult StationMap(string? country, string? state)
+    {
+        if (string.IsNullOrWhiteSpace(country))
+        {
+            throw new InvalidRequestException("country is required (" + string.Join(" or ", StationCache.Snapshot.MapCountries) + ")");
+        }
+        string c = country.Trim().ToUpperInvariant();
+        if (!StationCache.Snapshot.MapCountries.Contains(c, StringComparer.Ordinal))
+        {
+            throw new InvalidRequestException(
+                $"country must be one of {string.Join(", ", StationCache.Snapshot.MapCountries)}; got '{country.Trim()}'");
+        }
+        string? st = null;
+        if (!string.IsNullOrWhiteSpace(state))
+        {
+            st = state.Trim().ToUpperInvariant();
+            if (st.Length != 2 || !char.IsAsciiLetterUpper(st[0]) || !char.IsAsciiLetterUpper(st[1]))
+            {
+                throw new InvalidRequestException($"state must be a two-letter code; got '{state.Trim()}'");
+            }
+        }
+        StationCache.Snapshot snap = Snapshot();
+        IReadOnlyList<StationInfo> all = snap.MapByCountry.TryGetValue(c, out IReadOnlyList<StationInfo>? list) ? list : [];
+        IReadOnlyList<StationInfo> view = st is null
+            ? all
+            : all.Where(s => string.Equals(s.State?.Trim(), st, StringComparison.OrdinalIgnoreCase)).ToList();
+        string etag = $"\"{c}-{st ?? "ALL"}-{snap.LoadedUtc.Ticks:x}-{all.Count}\"";
+        return new StationMapResult(etag,
+            new StationMapDto(c, st, view.Count, snap.LoadedUtc, view.Select(StationPinDto.Of).ToList()));
+    }
+
     private StationCache.Snapshot Snapshot() =>
         cache.Current ?? throw new ServiceUnavailableException("The station list is not loaded yet; try again shortly");
 
@@ -131,6 +169,35 @@ public sealed record StationDto(
     public static StationDto Of(StationInfo s) => new(
         s.Sid, s.Mli, s.Country, s.State, s.Lat, s.Lon, s.Tz, s.LocType, s.LocName, s.LakeId?.ToLowerInvariant(),
         s.LakeId is null ? null : s.LakeName, s.Elevation, s.Agency, s.HasFish, s.Supported, s.UpdData, s.WeatherStamp);
+}
+
+/// <summary>A map answer and its entity tag.</summary>
+public sealed record StationMapResult(string ETag, StationMapDto Body);
+
+/// <summary><c>data</c> of <c>/stations/map</c>: waterapi's <c>/water/station/map</c> body, field for field.</summary>
+public sealed record StationMapDto(
+    string Country, string? State, int Count, DateTime LoadedUtc, IReadOnlyList<StationPinDto> Stations);
+
+/// <summary>One map pin. <c>key</c> = the sid in base 36 (the map's links); <c>stamp</c> = the last reading, UTC.</summary>
+public sealed record StationPinDto(int Sid, string Key, double Lat, double Lon, string State, DateTime Stamp)
+{
+    private const string Base36Digits = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+    public static StationPinDto Of(StationInfo s) =>
+        new(s.Sid, ToBase36((ulong)s.Sid), s.Lat, s.Lon, s.State?.Trim() ?? "", s.UpdData!.Value);
+
+    /// <summary>Upper-case base 36, identical to waterapi's and the legacy map page's encoder.</summary>
+    public static string ToBase36(ulong value)
+    {
+        Span<char> buffer = stackalloc char[13];
+        int pos = buffer.Length;
+        do
+        {
+            buffer[--pos] = Base36Digits[(int)(value % 36)];
+            value /= 36;
+        } while (value != 0);
+        return new string(buffer[pos..]);
+    }
 }
 
 /// <summary>The flow state of a station (envdata <c>sp_fill_flow_state</c>); null fields = not computed.</summary>
