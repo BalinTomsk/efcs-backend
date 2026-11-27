@@ -52,6 +52,22 @@ It must always reflect the current state of the code.
 - Do not leave `docs/specification.md` describing behaviour that no longer exists, or omitting
   behaviour that was added.
 - Treat every code change as a two-step commit: ① change the code, ② update `docs/specification.md`.
+- Give variables, functions, modules, etc. names that unambiguously indicate their purpose
+- Use ASD-STE100 for instructions and answers
+
+
+---
+
+##IMPORTANT
+Explicitly follows database schema at:
+- @srv/../../envfish-db
+
+- **DO NOT COMMIT without explicit user permission.**
+- **DO NOT PUSH without explicit user permission.**
+- **DO NOT CREATE, MERGE, OR CLOSE PULL REQUESTS without explicit user permission.**
+- **When add/delete/update functionality create PR to make the same change in C# clone of this service if applicable in ..\..\..\efj-backend\service\waterservice **
+- When code changes are requested, make the file edits and stop with a status summary unless the
+  user explicitly asks for Git actions.
 
 ---
 

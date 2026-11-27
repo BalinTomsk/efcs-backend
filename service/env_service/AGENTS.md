@@ -38,6 +38,9 @@ Deploy runbook: `docs/do-update.md`. Endpoint contracts: `docs/api-reference.htm
 - **Exposure (later REST):** through cproxy and the VPC only; every route under `/api/v1/env/`.
 - **Sized before deploy:** memory cap + the 150 MB guard; verify by restart count, never a log tail.
 - No `InvariantGlobalization`; option collections default to **empty**; tests in TUnit.
+- Give variables, functions, modules, etc. names that unambiguously indicate their purpose
+- Use ASD-STE100 for instructions and answers
+
 
 ## Build & test
 

@@ -27,6 +27,8 @@ self-contained linux-x64 on `debian:trixie-slim`, uid 10001) with news_idx's Rab
   the same state. Do not add a retry queue.
 - **Never crash-loop.** RabbitMQ unavailable = retry the declare with back-off; csnode is small and shared.
 - Never publish 8080 or 8081. adminservice has no public API.
+- Give variables, functions, modules, etc. names that unambiguously indicate their purpose
+- Use ASD-STE100 for instructions and answers
 
 ## Build & test
 

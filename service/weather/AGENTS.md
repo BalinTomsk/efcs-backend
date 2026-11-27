@@ -28,6 +28,21 @@ four together:
 | `.claude/skills/update-weather/SKILL.md` | The automated version of `do-update.md` — keep the two in step |
 | `.env.example` | The variable contract, mirrored in `efcs-backend/secret/plaintext.env` |
 
+
+##IMPORTANT
+Explicitly follows database schema at:
+- @srv/../../envfish-db
+
+- **DO NOT COMMIT without explicit user permission.**
+- **DO NOT PUSH without explicit user permission.**
+- **DO NOT CREATE, MERGE, OR CLOSE PULL REQUESTS without explicit user permission.**
+- **When add/delete/update functionality create PR to make the same change in C# clone of this service if applicable in ..\..\..\efj-backend\service\weather **
+- When code changes are requested, make the file edits and stop with a status summary unless the
+  user explicitly asks for Git actions.
+- Give variables, functions, modules, etc. names that unambiguously indicate their purpose
+- Use ASD-STE100 for instructions and answers
+
+
 ## Git
 
 - **DO NOT COMMIT, PUSH, or CREATE/MERGE PULL REQUESTS without explicit user permission.** Make the

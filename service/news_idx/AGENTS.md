@@ -30,6 +30,9 @@ with **bge-small-en-v1.5** (ONNX, in-process) → **Qdrant** (`news_articles`), 
   (timestamps cannot see it).
 - The two collections move together: every index/remove path writes both (`NewsIndexer`).
 - Model files stay out of git (`models/`, fetched by `scripts/fetch-model.ps1`).
+- Give variables, functions, modules, etc. names that unambiguously indicate their purpose
+- Use ASD-STE100 for instructions and answers
+
 
 ## Build & test
 

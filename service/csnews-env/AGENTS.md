@@ -33,6 +33,8 @@ git-ignored** (it carries host details); keep it local and up to date.
 - **csnode is small** (~1 GB, five .NET services). Keep the memory cap, workstation GC and the 150 MB guard.
 - Keep docs in sync: code, `docs/specification.md`, `docs/api-reference.html`, and `CHANGELOG.md` under
   `[Unreleased]`. A change to a `/api/v1/csnews/*` shape changes docapi's `Http*Repository` classes too.
+- Give variables, functions, modules, etc. names that unambiguously indicate their purpose
+- Use ASD-STE100 for instructions and answers
 
 ## Build & test
 

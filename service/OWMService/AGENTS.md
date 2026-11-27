@@ -13,6 +13,9 @@ This repo has an unusual project setup — read carefully before building:
 - **`OWMService.csproj`** (repo root) is the real, buildable project. It is an **old-style MSBuild project** using `packages.config` (NOT SDK-style). Despite the `<Compile>` layout it pulls in *everything*: root files (`Program.cs`, `RWS.cs`), the `Config/` and `Logging/` folders, the `OWMService/Workers` + `OWMService/Logging` subfolders, **and** the test file `OWMService.Tests/Workers/WeatherDataWorkerTests.cs` (compiled directly into the exe, along with xUnit/Moq references).
 - **`OWMService.sln`** references only `OWMService.csproj`.
 - **`OWMService.Tests/OWMService.Tests.csproj`** is a separate SDK-style test project that is **not** in the solution. It duplicates the same test file via `ProjectReference`.
+- Give variables, functions, modules, etc. names that unambiguously indicate their purpose
+- Use ASD-STE100 for instructions and answers
+
 
 Because the main project is packages.config-based, build with MSBuild + NuGet restore, not `dotnet build`:
 
